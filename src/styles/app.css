@@ -12,8 +12,8 @@
   --success: oklch(58% 0.16 145);
   --warn: oklch(62% 0.15 80);
   --shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
-  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-display: "PingFang SC", "Heiti SC", "STHeiti", "Hiragino Sans GB", "Noto Sans CJK SC", -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  --font-body: "PingFang SC", "Heiti SC", "STHeiti", "Hiragino Sans GB", "Noto Sans CJK SC", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   color: var(--fg);
   background: var(--app-bg);
