@@ -8,9 +8,12 @@
 - Vue 3 + TypeScript + Vite 前端。
 - Tauri 2 应用壳。
 - 移动端优先 UI：聊天、会话抽屉、模型选择、Provider 配置、模型参数和设置页。
-- 本地持久化会话、模型、Provider 元数据和偏好设置。
-- 模拟流式输出、停止生成、重试、复制、引用和删除消息。
-- API Key 仅记录安全存储引用和遮罩，不写入普通 localStorage 或导出 JSON。
+- IndexedDB 本地持久化会话、模型、Provider 元数据和偏好设置。
+- OpenAI-compatible、Anthropic、Gemini 和 custom 真实 Provider 流式聊天、停止生成、重试、复制、引用和删除消息。
+- API Key 写入 Tauri/Rust 系统安全存储；普通本地数据和导出 JSON 只保存引用与遮罩。
+- 会话 Markdown 导出、全量 JSON 导入导出，不包含 API Key。
+- 当前会话系统提示词、上下文消息数控制和提示词模板变量填充。
+- 文本/Markdown/JSON 附件会作为上下文加入下一条真实请求；图片附件会按模型视觉能力发送。
 
 ## 运行
 

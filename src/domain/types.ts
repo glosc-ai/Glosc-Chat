@@ -9,12 +9,16 @@ export interface ProviderConfig {
   name: string;
   type: ProviderType;
   baseUrl: string;
+  chatPath: string;
+  modelsPath: string;
+  customHeaders?: string;
   apiKeyRef: string;
   keyHint: string;
   hasApiKey: boolean;
   enabled: boolean;
   status: ProviderStatus;
   lastCheckedAt?: string;
+  syncedModelIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -52,15 +56,36 @@ export interface Conversation {
   updatedAt: string;
 }
 
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type MessageRole = "system" | "user" | "assistant" | "tool";
 
 export type MessageStatus = "pending" | "streaming" | "done" | "failed" | "cancelled";
+
+export type AttachmentKind = "text" | "image";
+
+export interface MessageAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  kind: AttachmentKind;
+  dataUrl?: string;
+  createdAt: string;
+}
 
 export interface ChatMessage {
   id: string;
   conversationId: string;
   role: MessageRole;
   content: string;
+  attachments?: MessageAttachment[];
   status: MessageStatus;
   errorCode?: string;
   createdAt: string;
@@ -68,9 +93,11 @@ export interface ChatMessage {
 }
 
 export interface UserSettings {
+  onboardingCompleted: boolean;
   darkMode: boolean;
   fontSize: "small" | "medium" | "large";
   redactLogs: boolean;
   localOnly: boolean;
-  defaultModelId: string;
+  defaultModelId: string | null;
+  contextMessageLimit: number;
 }

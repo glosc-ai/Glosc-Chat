@@ -12,14 +12,14 @@ Glosc Chat 是一款面向 Android 和 iOS 的 AI 会话应用。用户可以自
 | --- | --- |
 | 前端框架 | 已接入 Vue 3 + TypeScript + Vite |
 | 应用壳 | 已接入 Tauri 2 |
-| Rust 命令 | 保留最小 Tauri 入口，后续接入安全存储和网络代理 |
-| AI 会话 | 已实现本地模拟流式聊天闭环，真实 Provider 调用待接入 |
-| API Key 配置 | 已实现 Provider 表单和密钥遮罩/引用，系统安全存储待接入 |
-| 会话历史 | 已实现本地会话、消息和模型配置持久化 |
-| 移动端构建 | Tauri 具备扩展基础，尚未配置 Android/iOS 工程 |
+| Rust 命令 | 已接入 API Key 安全存储、模型列表查询和多 Provider 流式网络代理 |
+| AI 会话 | 已实现 OpenAI-compatible、Anthropic、Gemini 和 custom 真实流式聊天闭环 |
+| API Key 配置 | 已实现 Provider 表单、密钥遮罩/引用和 Tauri/Rust 系统安全存储 |
+| 会话历史 | 已实现 IndexedDB 本地会话、消息和模型配置持久化 |
+| 移动端构建 | 已生成 Tauri Android/iOS 工程骨架，真机签名和发布流程待验证 |
 | 文档 | 已建立项目、设计和开发文档，并同步当前实现状态 |
 
-当前仓库已从初始化模板演进为可运行的移动端优先原型。后续开发应优先把模拟流式响应替换为真实 Provider 适配和系统安全存储，再扩展知识库、工具调用、同步和高级管理能力。
+当前仓库已从初始化模板演进为可运行的移动端优先 MVP，并具备多 Provider 真实请求闭环。后续开发应优先扩展知识库、工具调用、同步和高级管理能力。
 
 ## 3. 产品定位
 
@@ -59,9 +59,13 @@ Glosc Chat 是一款面向 Android 和 iOS 的 AI 会话应用。用户可以自
 - Vite + Vue 3 前端工程。
 - Tauri 2 应用壳。
 - Open Design 视觉落地：聊天页、会话抽屉、模型页、Provider 配置页和设置页。
-- 本地模拟流式输出、停止生成、重试、复制、引用和删除消息。
-- Provider 配置、模型分组、模型参数、默认模型和本地设置。
-- 本地持久化会话、消息、Provider 元数据、模型和偏好设置。
+- OpenAI-compatible、Anthropic、Gemini 和 custom 真实流式输出、停止生成、重试、复制、引用和删除消息。
+- Provider 配置、系统安全存储密钥、模型同步、模型参数、默认模型和本地设置。
+- IndexedDB 本地持久化会话、消息、Provider 元数据、模型和偏好设置。
+- 会话搜索、置顶、归档、删除和 Markdown 导出。
+- 当前会话系统提示词、最近上下文消息数控制和提示词模板变量填充。
+- JSON 导入导出，导出前提示敏感内容风险，导出数据不包含 API Key。
+- 文本/Markdown/JSON 附件作为上下文加入下一条请求；图片附件按模型视觉能力发送给支持的 Provider。
 - 基础构建脚本：`dev`、`build`、`preview`、`tauri:dev`、`tauri:build`。
 
 ### 5.2 MVP 范围
@@ -77,7 +81,7 @@ MVP 的目标是让用户可以稳定完成一次真实 AI 对话，并能在下
 | Markdown | 支持代码块、列表、链接、复制 |
 | 设置 | 支持编辑 Provider、默认模型、上下文长度、温度等参数 |
 | 错误处理 | 展示鉴权失败、网络失败、限流、模型不存在等状态 |
-| 数据安全 | 密钥不写入明文 localStorage；发布前引入系统安全存储 |
+| 数据安全 | 密钥不写入明文 localStorage；已通过 Tauri/Rust 命令接入系统安全存储 |
 
 ### 5.3 V1 范围
 
@@ -181,9 +185,9 @@ MVP 推荐信息架构：
 | 构建 | Vite | 当前固定端口 `1420` 以适配 Tauri |
 | 应用壳 | Tauri 2 | 支持桌面端，后续可配置移动端 |
 | 原生层 | Rust | 适合实现安全存储、文件、系统能力和网络代理 |
-| 包管理 | 当前 Tauri 配置使用 `yarn` | 仓库暂无 lockfile，建议尽快统一 |
+| 包管理 | npm | 仓库包含 `package-lock.json`，Tauri 配置使用 `npm run dev` 和 `npm run build` |
 
-发布前需要确认 `src-tauri/tauri.conf.json` 中的应用标识符。当前值为 `con.gloscai.glosc-chat`，如果是正式域名反写，通常应核对是否为 `com.gloscai.glosc-chat`。
+`src-tauri/tauri.conf.json` 中的应用标识符当前为 `com.gloscai.glosc-chat`。
 
 ## 10. 数据与隐私要求
 
@@ -216,7 +220,7 @@ MVP 推荐信息架构：
 ### M1：可对话 MVP
 
 - Provider 配置。
-- OpenAI-compatible 流式聊天。
+- 多 Provider 真实流式聊天。
 - 本地会话历史。
 - Markdown 渲染。
 - 错误处理和重试。
