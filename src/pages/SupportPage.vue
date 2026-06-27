@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CircleHelp, Github, Mail, RefreshCw, Settings2, ShieldAlert, Wrench } from "lucide-vue-next";
+import { CircleHelp, ExternalLink, Mail, RefreshCw, Settings2, ShieldAlert, Wrench } from "@lucide/vue";
 import PageHeader from "../components/PageHeader.vue";
 import SiteLayout from "../components/SiteLayout.vue";
 
@@ -12,7 +12,7 @@ const supportCards = [
     href: "mailto:support@gloscai.com"
   },
   {
-    icon: Github,
+    icon: ExternalLink,
     title: "GitHub Issues",
     text: "适合提交可复现的缺陷、构建问题和功能建议。",
     action: "打开项目",

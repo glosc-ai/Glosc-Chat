@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
-import { Menu, MessageSquareText, X } from "lucide-vue-next";
+import { Menu, MessageSquareText, X } from "@lucide/vue";
 
 const route = useRoute();
 const isMenuOpen = ref(false);
@@ -49,7 +49,7 @@ function closeMenu() {
           rel="noreferrer"
           target="_blank"
         >
-          获取应用
+          下载
         </a>
 
         <button
@@ -82,7 +82,7 @@ function closeMenu() {
             target="_blank"
             @click="closeMenu"
           >
-            获取应用
+            下载
           </a>
         </div>
       </div>

@@ -3,13 +3,13 @@ import {
   CloudOff,
   Database,
   Download,
+  ExternalLink,
   KeyRound,
   Layers3,
   LockKeyhole,
-  MessageSquareText,
   ShieldCheck,
   Smartphone
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import ProductPreview from "../components/ProductPreview.vue";
 import SiteLayout from "../components/SiteLayout.vue";
 
@@ -61,7 +61,7 @@ const workflows = [
             一款 BYOK 多模型 AI 聊天客户端。你自行接入 OpenAI-compatible、Anthropic、Gemini 或自定义模型服务，在一个应用里统一聊天、切换模型、管理会话和导出数据。
           </p>
 
-          <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+          <div class="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <a
               class="inline-flex items-center justify-center gap-2 rounded-full bg-ink-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-moss-700"
               href="https://github.com/glosc-ai/Glosc-Chat/releases"
@@ -69,15 +69,26 @@ const workflows = [
               target="_blank"
             >
               <Download class="size-4" aria-hidden="true" />
-              获取应用
+              下载
             </a>
-            <RouterLink
+            <a
               class="inline-flex items-center justify-center gap-2 rounded-full border border-black/12 bg-white px-6 py-3 text-sm font-semibold text-ink-950 transition hover:border-moss-700 hover:text-moss-700"
-              to="/support"
+              href="https://one.gloscai.com/keys"
+              rel="noreferrer"
+              target="_blank"
             >
-              <MessageSquareText class="size-4" aria-hidden="true" />
-              查看技术支持
-            </RouterLink>
+              <KeyRound class="size-4" aria-hidden="true" />
+              获取 key
+            </a>
+            <a
+              class="inline-flex items-center justify-center gap-2 rounded-full border border-black/12 bg-white px-6 py-3 text-sm font-semibold text-ink-950 transition hover:border-moss-700 hover:text-moss-700"
+              href="https://github.com/glosc-ai/Glosc-Chat"
+              rel="noreferrer"
+              target="_blank"
+            >
+              <ExternalLink class="size-4" aria-hidden="true" />
+              GitHub
+            </a>
           </div>
 
           <div class="mt-10 grid max-w-2xl grid-cols-1 gap-3 text-sm text-ink-700 sm:grid-cols-3">

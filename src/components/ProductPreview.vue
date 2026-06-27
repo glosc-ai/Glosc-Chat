@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bot, Check, KeyRound, Paperclip, SendHorizontal } from "lucide-vue-next";
+import { Bot, Check, KeyRound, Paperclip, SendHorizontal } from "@lucide/vue";
 </script>
 
 <template>
