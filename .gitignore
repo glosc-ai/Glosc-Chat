@@ -26,3 +26,6 @@ dist-ssr
 output
 .env
 build
+appstore-screenshots
+CoreSimulator
+src-tauri/gen/apple/DerivedData/

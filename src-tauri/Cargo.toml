@@ -1,6 +1,6 @@
 [package]
 name = "glosc-chat"
-version = "0.1.0"
+version = "1.0.1"
 description = "A local-first BYOK multi-model chat client"
 authors = ["Glosc AI"]
 edition = "2021"
