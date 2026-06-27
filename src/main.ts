@@ -1,8 +1,6 @@
 import { createApp } from "vue";
 import App from "./App.vue";
-import { initializeFirebaseAnalytics } from "./services/firebaseAnalytics";
-import "./styles/app.css";
+import { router } from "./router";
+import "./styles/main.css";
 
-void initializeFirebaseAnalytics();
-
-createApp(App).mount("#app");
+createApp(App).use(router).mount("#app");
