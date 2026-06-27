@@ -55,6 +55,7 @@ import type {
   UserSettings,
 } from "./domain/types";
 import { cancelChatStream, streamChatCompletion, type ChatStreamEvent } from "./services/chatService";
+import { trackAppScreen } from "./services/firebaseAnalytics";
 import { listProviderModels, type ProviderModelSummary } from "./services/providerService";
 import { apiKeyExists, deleteApiKey, saveApiKey } from "./services/secretService";
 import {
@@ -311,6 +312,12 @@ watch(
   (enabled) => {
     document.documentElement.style.colorScheme = enabled ? "dark" : "light";
   },
+  { immediate: true },
+);
+
+watch(
+  () => activeTab.value,
+  (tab) => trackAppScreen(tab),
   { immediate: true },
 );
 
