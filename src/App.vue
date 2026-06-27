@@ -38,6 +38,7 @@ import {
   Upload,
   WifiOff,
 } from "@lucide/vue";
+import MarkdownIt from "markdown-it";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { defaultParameters, defaultSettings } from "./data/defaults";
 import type {
@@ -64,11 +65,6 @@ import {
 } from "./services/storageService";
 
 type ModelFilter = "all" | "chat" | "vision" | "tools";
-type MessageBlock =
-  | { type: "paragraph"; text: string }
-  | { type: "code"; lang: string; text: string }
-  | { type: "list"; ordered: boolean; items: string[] };
-type InlinePart = { type: "text" | "code"; text: string } | { type: "link"; text: string; href: string };
 
 const GLOSC_AI_PROVIDER_ID = "glosc-ai";
 const GLOSC_AI_PROVIDER_NAME = "Glosc AI";
@@ -109,6 +105,26 @@ const providerModelsPathDefaults: Record<ProviderType, string> = {
   anthropic: "/v1/models",
   gemini: "/models",
   custom: "/models",
+};
+
+const markdown = new MarkdownIt({
+  breaks: true,
+  html: false,
+  linkify: true,
+  typographer: false,
+});
+
+markdown.validateLink = (url) => isSafeMarkdownLink(url);
+
+const defaultLinkOpen =
+  markdown.renderer.rules.link_open ??
+  ((tokens, index, options, _env, self) => self.renderToken(tokens, index, options));
+
+markdown.renderer.rules.link_open = (tokens, index, options, env, self) => {
+  const token = tokens[index];
+  token.attrSet("target", "_blank");
+  token.attrSet("rel", "noopener noreferrer");
+  return defaultLinkOpen(tokens, index, options, env, self);
 };
 
 const activeTab = ref<AppTab>("chat");
@@ -1503,57 +1519,12 @@ function cycleFontSize(): void {
   showToast(`字体大小：${fontSizeLabel(state.settings.fontSize)}`);
 }
 
-function parseMessageBlocks(content: string): MessageBlock[] {
-  const blocks: MessageBlock[] = [];
-  const fencePattern = /```(\w+)?\n([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = fencePattern.exec(content))) {
-    const before = content.slice(lastIndex, match.index).trim();
-    if (before) blocks.push(...parseTextBlocks(before));
-    blocks.push({ type: "code", lang: match[1] ?? "", text: match[2].trimEnd() });
-    lastIndex = match.index + match[0].length;
-  }
-
-  const after = content.slice(lastIndex).trim();
-  if (after) blocks.push(...parseTextBlocks(after));
-  return blocks.length ? blocks : [{ type: "paragraph", text: content }];
+function renderMarkdown(content: string): string {
+  return markdown.render(content);
 }
 
-function parseTextBlocks(text: string): MessageBlock[] {
-  const blocks: MessageBlock[] = [];
-
-  for (const chunk of text.split(/\n{2,}/)) {
-    const lines = chunk.split("\n").map((line) => line.trim()).filter(Boolean);
-    const unordered = lines.every((line) => /^[-*]\s+/.test(line));
-    const ordered = lines.every((line) => /^\d+[.)]\s+/.test(line));
-
-    if ((unordered || ordered) && lines.length > 0) {
-      blocks.push({
-        type: "list",
-        ordered,
-        items: lines.map((line) => line.replace(ordered ? /^\d+[.)]\s+/ : /^[-*]\s+/, "")),
-      });
-    } else {
-      blocks.push({ type: "paragraph", text: chunk });
-    }
-  }
-
-  return blocks;
-}
-
-function parseInlineCode(text: string): InlinePart[] {
-  return text.split(/(`[^`]+`|\[[^\]]+\]\([^)]+\))/g).filter(Boolean).map((part) => {
-    if (part.startsWith("`") && part.endsWith("`")) return { type: "code", text: part.slice(1, -1) };
-    const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-    if (link) return { type: "link", text: link[1], href: sanitizeLink(link[2]) };
-    return { type: "text", text: part };
-  });
-}
-
-function sanitizeLink(href: string): string {
-  return /^(https?:|mailto:)/i.test(href) ? href : "#";
+function isSafeMarkdownLink(url: string): boolean {
+  return /^(https?:|mailto:)/i.test(url);
 }
 
 function formatMessageTime(value: string): string {
@@ -1749,27 +1720,7 @@ function showToast(text: string): void {
                   <span>{{ attachment.name }}</span>
                 </div>
               </div>
-              <template v-if="message.content.trim()">
-                <template v-for="(block, index) in parseMessageBlocks(message.content)" :key="`${message.id}-${index}`">
-                  <pre v-if="block.type === 'code'"><code>{{ block.text }}</code></pre>
-                  <component :is="block.ordered ? 'ol' : 'ul'" v-else-if="block.type === 'list'">
-                    <li v-for="(item, itemIndex) in block.items" :key="itemIndex">
-                      <template v-for="(part, partIndex) in parseInlineCode(item)" :key="partIndex">
-                        <code v-if="part.type === 'code'">{{ part.text }}</code>
-                        <a v-else-if="part.type === 'link'" :href="part.href" target="_blank" rel="noreferrer">{{ part.text }}</a>
-                        <span v-else>{{ part.text }}</span>
-                      </template>
-                    </li>
-                  </component>
-                  <p v-else>
-                    <template v-for="(part, partIndex) in parseInlineCode(block.text)" :key="partIndex">
-                      <code v-if="part.type === 'code'">{{ part.text }}</code>
-                      <a v-else-if="part.type === 'link'" :href="part.href" target="_blank" rel="noreferrer">{{ part.text }}</a>
-                      <span v-else>{{ part.text }}</span>
-                    </template>
-                  </p>
-                </template>
-              </template>
+              <div v-if="message.content.trim()" class="markdown-body" v-html="renderMarkdown(message.content)"></div>
               <span v-if="message.status === 'streaming' && message.id === activeAssistantId" class="streaming-cursor"></span>
             </div>
             <div v-if="message.status === 'failed'" class="error-recovery">

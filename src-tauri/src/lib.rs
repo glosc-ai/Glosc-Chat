@@ -11,7 +11,11 @@ use std::{
         Arc, Mutex,
     },
 };
-use tauri::{ipc::Channel, State};
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use std::{fs, io::ErrorKind, path::PathBuf};
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use tauri::Manager;
+use tauri::{ipc::Channel, AppHandle, State};
 
 const SECRET_SERVICE: &str = "com.gloscai.glosc-chat";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -104,47 +108,69 @@ fn save_api_key(
     provider_id: String,
     api_key: String,
     secrets: State<'_, SecretCache>,
+    app: AppHandle,
 ) -> Result<String, String> {
     let trimmed = api_key.trim();
     if trimmed.is_empty() {
         return Err("API Key 不能为空".to_string());
     }
 
-    secret_entry(&provider_id)?
-        .set_password(trimmed)
-        .map_err(|_| "无法写入系统安全存储".to_string())?;
+    let keyring_result = secret_entry(&provider_id).and_then(|entry| {
+        entry
+            .set_password(trimmed)
+            .map_err(|_| "无法写入系统安全存储".to_string())
+    });
+    if let Err(message) = keyring_result {
+        if !mobile_secret_fallback_available() {
+            return Err(message);
+        }
+    }
+    persist_mobile_api_key(&app, &provider_id, trimmed)?;
     cache_api_key(&secrets, &provider_id, trimmed)?;
 
     Ok(mask_key(trimmed))
 }
 
 #[tauri::command]
-fn api_key_exists(provider_id: String, secrets: State<'_, SecretCache>) -> Result<bool, String> {
-    match secret_entry(&provider_id)?.get_password() {
-        Ok(value) if !value.trim().is_empty() => Ok(true),
-        _ => Ok(cached_api_key(&secrets, &provider_id)?.is_some()),
+fn api_key_exists(
+    provider_id: String,
+    secrets: State<'_, SecretCache>,
+    app: AppHandle,
+) -> Result<bool, String> {
+    if let Ok(entry) = secret_entry(&provider_id) {
+        if let Ok(value) = entry.get_password() {
+            if !value.trim().is_empty() {
+                return Ok(true);
+            }
+        }
     }
+    Ok(cached_api_key(&secrets, &provider_id)?.is_some()
+        || read_mobile_api_key(&app, &provider_id)?.is_some())
 }
 
 #[tauri::command]
-fn delete_api_key(provider_id: String, secrets: State<'_, SecretCache>) -> Result<(), String> {
+fn delete_api_key(
+    provider_id: String,
+    secrets: State<'_, SecretCache>,
+    app: AppHandle,
+) -> Result<(), String> {
     if let Ok(mut cache) = secrets.0.lock() {
         cache.remove(&provider_id);
     }
 
-    let entry = secret_entry(&provider_id)?;
-    match entry.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(_) => Ok(()),
+    if let Ok(entry) = secret_entry(&provider_id) {
+        let _ = entry.delete_credential();
     }
+    delete_mobile_api_key(&app, &provider_id)
 }
 
 #[tauri::command]
 async fn list_openai_models(
     provider: ProviderRequest,
     secrets: State<'_, SecretCache>,
+    app: AppHandle,
 ) -> Result<Vec<ModelSummary>, String> {
-    list_provider_models(provider, &secrets).await
+    list_provider_models(provider, &secrets, &app).await
 }
 
 #[tauri::command]
@@ -153,6 +179,7 @@ async fn stream_openai_chat(
     on_event: Channel<ChatStreamEvent>,
     cancels: State<'_, StreamCancels>,
     secrets: State<'_, SecretCache>,
+    app: AppHandle,
 ) -> Result<(), String> {
     let cancel_flag = Arc::new(AtomicBool::new(false));
     cancels
@@ -161,7 +188,7 @@ async fn stream_openai_chat(
         .map_err(|_| "取消状态不可用".to_string())?
         .insert(request.request_id.clone(), cancel_flag.clone());
 
-    let result = stream_provider_chat_inner(&request, &on_event, cancel_flag, &secrets).await;
+    let result = stream_provider_chat_inner(&request, &on_event, cancel_flag, &secrets, &app).await;
 
     if let Ok(mut map) = cancels.0.lock() {
         map.remove(&request.request_id);
@@ -191,9 +218,10 @@ fn cancel_stream(request_id: String, cancels: State<'_, StreamCancels>) -> Resul
 async fn list_provider_models(
     provider: ProviderRequest,
     secrets: &State<'_, SecretCache>,
+    app: &AppHandle,
 ) -> Result<Vec<ModelSummary>, String> {
     let kind = provider_kind(&provider)?;
-    let api_key = read_api_key(&provider.id, secrets)?;
+    let api_key = read_api_key(&provider.id, secrets, app)?;
     let default_path = match kind {
         ProviderKind::OpenAiCompatible | ProviderKind::Custom => "/models",
         ProviderKind::Anthropic => "/v1/models",
@@ -209,7 +237,11 @@ async fn list_provider_models(
 
     let response = reqwest::Client::new()
         .get(url)
-        .headers(build_headers(kind, &api_key, provider.custom_headers.as_deref())?)
+        .headers(build_headers(
+            kind,
+            &api_key,
+            provider.custom_headers.as_deref(),
+        )?)
         .send()
         .await
         .map_err(map_network_error)?;
@@ -233,9 +265,10 @@ async fn stream_provider_chat_inner(
     on_event: &Channel<ChatStreamEvent>,
     cancel_flag: Arc<AtomicBool>,
     secrets: &State<'_, SecretCache>,
+    app: &AppHandle,
 ) -> Result<(), String> {
     let kind = provider_kind(&request.provider)?;
-    let api_key = read_api_key(&request.provider.id, secrets)?;
+    let api_key = read_api_key(&request.provider.id, secrets, app)?;
     let (url, payload) = build_chat_request(kind, request, &api_key)?;
 
     let response = reqwest::Client::new()
@@ -349,7 +382,11 @@ fn build_chat_request(
         ProviderKind::Anthropic => {
             let url = join_url(
                 &request.provider.base_url,
-                request.provider.chat_path.as_deref().unwrap_or("/v1/messages"),
+                request
+                    .provider
+                    .chat_path
+                    .as_deref()
+                    .unwrap_or("/v1/messages"),
             )?;
             Ok((url, anthropic_payload(request)))
         }
@@ -360,7 +397,11 @@ fn build_chat_request(
                 .as_deref()
                 .unwrap_or("/models/{model}:streamGenerateContent?alt=sse")
                 .replace("{model}", &request.model.name);
-            let url = append_query(&join_url(&request.provider.base_url, &path)?, "key", api_key);
+            let url = append_query(
+                &join_url(&request.provider.base_url, &path)?,
+                "key",
+                api_key,
+            );
             Ok((url, gemini_payload(request)))
         }
     }
@@ -552,7 +593,8 @@ fn strip_data_url_prefix(value: &str) -> String {
 }
 
 fn extract_delta_text(kind: ProviderKind, data: &str) -> Result<ParsedDelta, String> {
-    let value = serde_json::from_str::<Value>(data).map_err(|_| "流式响应 JSON 无效".to_string())?;
+    let value =
+        serde_json::from_str::<Value>(data).map_err(|_| "流式响应 JSON 无效".to_string())?;
 
     if let Some(message) = value
         .get("error")
@@ -654,7 +696,8 @@ fn build_headers(
             let auth_value = format!("Bearer {api_key}");
             headers.insert(
                 AUTHORIZATION,
-                HeaderValue::from_str(&auth_value).map_err(|_| "API Key 包含非法字符".to_string())?,
+                HeaderValue::from_str(&auth_value)
+                    .map_err(|_| "API Key 包含非法字符".to_string())?,
             );
         }
         ProviderKind::Anthropic => {
@@ -681,7 +724,8 @@ fn build_headers(
             if key.eq_ignore_ascii_case("authorization") || key.eq_ignore_ascii_case("x-api-key") {
                 continue;
             }
-            let header_name = HeaderName::from_str(key).map_err(|_| format!("Header 名称无效：{key}"))?;
+            let header_name =
+                HeaderName::from_str(key).map_err(|_| format!("Header 名称无效：{key}"))?;
             let header_value = value
                 .as_str()
                 .ok_or_else(|| format!("Header 值必须是字符串：{key}"))?;
@@ -744,11 +788,108 @@ fn cached_api_key(
         .cloned())
 }
 
-fn read_api_key(provider_id: &str, secrets: &State<'_, SecretCache>) -> Result<String, String> {
-    match secret_entry(provider_id)?.get_password() {
-        Ok(value) if !value.trim().is_empty() => Ok(value),
-        _ => cached_api_key(secrets, provider_id)?
-            .ok_or_else(|| "未找到 Provider API Key，请重新保存 Provider".to_string()),
+fn read_api_key(
+    provider_id: &str,
+    secrets: &State<'_, SecretCache>,
+    app: &AppHandle,
+) -> Result<String, String> {
+    if let Ok(entry) = secret_entry(provider_id) {
+        if let Ok(value) = entry.get_password() {
+            if !value.trim().is_empty() {
+                return Ok(value);
+            }
+        }
+    }
+    cached_api_key(secrets, provider_id)?
+        .or(read_mobile_api_key(app, provider_id)?)
+        .ok_or_else(|| "未找到 Provider API Key，请重新保存 Provider".to_string())
+}
+
+fn mobile_secret_fallback_available() -> bool {
+    cfg!(any(target_os = "android", target_os = "ios"))
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn persist_mobile_api_key(app: &AppHandle, provider_id: &str, api_key: &str) -> Result<(), String> {
+    let path = mobile_secret_path(app, provider_id)?;
+    fs::write(&path, api_key).map_err(|_| "无法写入移动端应用私有密钥存储".to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn persist_mobile_api_key(
+    _app: &AppHandle,
+    _provider_id: &str,
+    _api_key: &str,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn read_mobile_api_key(app: &AppHandle, provider_id: &str) -> Result<Option<String>, String> {
+    let path = mobile_secret_path(app, provider_id)?;
+    match fs::read_to_string(path) {
+        Ok(value) => {
+            let trimmed = value.trim().to_string();
+            Ok((!trimmed.is_empty()).then_some(trimmed))
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(_) => Err("无法读取移动端应用私有密钥存储".to_string()),
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn read_mobile_api_key(_app: &AppHandle, _provider_id: &str) -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn delete_mobile_api_key(app: &AppHandle, provider_id: &str) -> Result<(), String> {
+    let path = mobile_secret_path(app, provider_id)?;
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(_) => Err("无法删除移动端应用私有密钥存储".to_string()),
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn delete_mobile_api_key(_app: &AppHandle, _provider_id: &str) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn mobile_secret_path(app: &AppHandle, provider_id: &str) -> Result<PathBuf, String> {
+    let mut dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "无法访问移动端应用数据目录".to_string())?;
+    dir.push("provider-secrets");
+    fs::create_dir_all(&dir).map_err(|_| "无法创建移动端应用私有密钥目录".to_string())?;
+    dir.push(format!("{}.key", secret_file_component(provider_id)));
+    Ok(dir)
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn secret_file_component(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' => {
+                encoded.push(byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    if encoded.is_empty() {
+        "provider".to_string()
+    } else {
+        encoded
     }
 }
 
@@ -759,7 +900,10 @@ fn mask_key(key: &str) -> String {
     }
     let prefix = chars.iter().take(4).collect::<String>();
     let suffix = chars.iter().rev().take(4).collect::<Vec<_>>();
-    format!("{prefix}...{}", suffix.into_iter().rev().collect::<String>())
+    format!(
+        "{prefix}...{}",
+        suffix.into_iter().rev().collect::<String>()
+    )
 }
 
 fn map_network_error(error: reqwest::Error) -> String {
