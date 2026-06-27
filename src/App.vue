@@ -37,6 +37,7 @@ import {
   Trash2,
   Upload,
   WifiOff,
+  X,
 } from "@lucide/vue";
 import MarkdownIt from "markdown-it";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -65,6 +66,11 @@ import {
 } from "./services/storageService";
 
 type ModelFilter = "all" | "chat" | "vision" | "tools";
+
+type ChatConfig = {
+  model: ModelConfig;
+  provider: ProviderConfig;
+};
 
 const GLOSC_AI_PROVIDER_ID = "glosc-ai";
 const GLOSC_AI_PROVIDER_NAME = "Glosc AI";
@@ -140,11 +146,17 @@ const showArchived = ref(false);
 const draft = ref("");
 const pendingAttachments = ref<MessageAttachment[]>([]);
 const modelFilter = ref<ModelFilter>("all");
+const modelSearch = ref("");
+const modelSheetSearch = ref("");
 const toastText = ref("");
 const toastVisible = ref(false);
 const activeAbort = ref<AbortController | null>(null);
 const activeAssistantId = ref<string | null>(null);
 const messagesEl = ref<HTMLElement | null>(null);
+const draftInput = ref<HTMLTextAreaElement | null>(null);
+const editingMessageId = ref<string | null>(null);
+const inlineEditDraft = ref("");
+const activeStreamScrollToBottom = ref(true);
 const toastTimer = ref<number | null>(null);
 const saveTimer = ref<number | null>(null);
 const longPressTimer = ref<number | null>(null);
@@ -153,6 +165,9 @@ const importFileInput = ref<HTMLInputElement | null>(null);
 const attachmentFileInput = ref<HTMLInputElement | null>(null);
 const providerReturnTab = ref<AppTab>("models");
 const syncingAllProviders = ref(false);
+const onboardingSyncingModels = ref(false);
+const onboardingModels = ref<ProviderModelSummary[]>([]);
+const onboardingModelsFetched = ref(false);
 const keyboardInset = ref(0);
 const appHeight = ref(0);
 const trackedViewport = ref<VisualViewport | null>(null);
@@ -213,12 +228,25 @@ const currentMessages = computed<ChatMessage[]>(() => {
   return state.messages[conversation.id] ?? [];
 });
 
+const selectableModels = computed(() => state.models.filter((model) => isSelectableModel(model)));
+
+const modelSheetModels = computed(() => {
+  const keyword = modelSheetSearch.value.trim().toLowerCase();
+  if (!keyword) return selectableModels.value;
+
+  return selectableModels.value.filter((model) => {
+    const provider = state.providers.find((item) => item.id === model.providerId);
+    return provider ? modelMatchesSearch(model, provider, keyword) : false;
+  });
+});
+
 const currentModel = computed<ModelConfig | undefined>(() => {
   const conversation = currentConversation.value;
+  const models = selectableModels.value;
   return (
-    state.models.find((item) => item.id === conversation?.modelId) ??
-    state.models.find((item) => item.id === state.settings.defaultModelId) ??
-    state.models[0]
+    models.find((item) => item.id === conversation?.modelId) ??
+    models.find((item) => item.id === state.settings.defaultModelId) ??
+    models[0]
   );
 });
 
@@ -229,7 +257,7 @@ const currentProvider = computed<ProviderConfig | undefined>(() => {
 const sendableProviderExists = computed(() => {
   return state.models.some((model) => {
     const provider = state.providers.find((item) => item.id === model.providerId);
-    return provider?.enabled && provider.hasApiKey;
+    return isModelEnabled(model) && provider?.enabled && provider.hasApiKey;
   });
 });
 
@@ -259,9 +287,10 @@ const filteredConversations = computed(() => {
 });
 
 const modelGroups = computed(() => {
+  const keyword = modelSearch.value.trim().toLowerCase();
   return state.providers
     .map((provider) => {
-      const models = state.models.filter((model) => model.providerId === provider.id && modelMatchesFilter(model));
+      const models = state.models.filter((model) => model.providerId === provider.id && modelMatchesFilter(model) && modelMatchesSearch(model, provider, keyword));
       return { provider, models };
     })
     .filter((group) => group.models.length > 0);
@@ -283,6 +312,14 @@ watch(
     document.documentElement.style.colorScheme = enabled ? "dark" : "light";
   },
   { immediate: true },
+);
+
+watch(
+  () => onboardingForm.apiKey,
+  () => {
+    onboardingModels.value = [];
+    onboardingModelsFetched.value = false;
+  },
 );
 
 onBeforeUnmount(() => {
@@ -403,9 +440,82 @@ async function completeOnboarding(): Promise<void> {
     return;
   }
 
-  const now = new Date().toISOString();
   const existing = state.providers.find((provider) => provider.id === id);
-  const nextProvider: ProviderConfig = {
+  const nextProvider = createGloscProviderConfig(id, keyHint, existing);
+
+  if (existing) {
+    Object.assign(existing, nextProvider);
+  } else {
+    state.providers.push(nextProvider);
+  }
+  const activeProvider = existing ?? nextProvider;
+
+  let syncedModels: ProviderModelSummary[] = [];
+  let toast = "初始化配置已完成";
+  try {
+    if (onboardingModelsFetched.value) {
+      syncedModels = onboardingModels.value;
+      applySyncedProviderModels(activeProvider, syncedModels);
+    } else {
+      syncedModels = await syncProviderModels(activeProvider);
+    }
+    toast = syncedModels.length ? `初始化完成，已从 API 同步 ${syncedModels.length} 个模型` : "初始化完成，但 API 没有返回模型列表";
+  } catch (error) {
+    toast = error instanceof Error ? `Provider 已保存，模型同步失败：${error.message}` : "Provider 已保存，模型同步失败";
+  }
+
+  const selectedModelName = chooseInitialModel(modelName, syncedModels);
+  if (selectedModelName && !state.models.some((model) => model.id === `${id}:${selectedModelName}`)) {
+    upsertModel(activeProvider, { id: selectedModelName, displayName: selectedModelName }, "自定义");
+  }
+  if (selectedModelName) state.settings.defaultModelId = `${id}:${selectedModelName}`;
+  ensureDefaultModelExists(id);
+  state.settings.onboardingCompleted = true;
+  onboardingForm.apiKey = "";
+  onboardingForm.showKey = false;
+  onboardingForm.modelId = "";
+  onboardingModels.value = [];
+  onboardingModelsFetched.value = false;
+  activeTab.value = "chat";
+
+  if (!state.selectedConversationId) {
+    newConversation();
+  }
+
+  showToast(toast);
+}
+
+async function fetchOnboardingModels(): Promise<void> {
+  const apiKey = onboardingForm.apiKey.trim();
+  if (!apiKey) {
+    showToast("请先填写 Glosc AI API Key");
+    return;
+  }
+  if (onboardingSyncingModels.value) return;
+
+  onboardingSyncingModels.value = true;
+  try {
+    const id = resolveGloscProviderId();
+    const keyHint = await saveApiKey(id, apiKey);
+    const provider = createGloscProviderConfig(id, keyHint, state.providers.find((item) => item.id === id));
+    const models = await listProviderModels(provider);
+    onboardingModels.value = models;
+    onboardingModelsFetched.value = true;
+
+    const selectedModelName = chooseInitialModel(onboardingForm.modelId, models);
+    if (selectedModelName) onboardingForm.modelId = selectedModelName;
+
+    showToast(models.length ? `已获取 ${models.length} 个模型` : "API 没有返回模型列表，可填写备用模型 ID");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error));
+  } finally {
+    onboardingSyncingModels.value = false;
+  }
+}
+
+function createGloscProviderConfig(id: string, keyHint: string, existing?: ProviderConfig): ProviderConfig {
+  const now = new Date().toISOString();
+  return {
     id,
     name: GLOSC_AI_PROVIDER_NAME,
     type: "openai-compatible",
@@ -423,40 +533,6 @@ async function completeOnboarding(): Promise<void> {
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
-
-  if (existing) {
-    Object.assign(existing, nextProvider);
-  } else {
-    state.providers.push(nextProvider);
-  }
-  const activeProvider = existing ?? nextProvider;
-
-  let syncedModels: ProviderModelSummary[] = [];
-  let toast = "初始化配置已完成";
-  try {
-    syncedModels = await syncProviderModels(activeProvider);
-    toast = syncedModels.length ? `初始化完成，已从 API 同步 ${syncedModels.length} 个模型` : "初始化完成，但 API 没有返回模型列表";
-  } catch (error) {
-    toast = error instanceof Error ? `Provider 已保存，模型同步失败：${error.message}` : "Provider 已保存，模型同步失败";
-  }
-
-  const selectedModelName = chooseInitialModel(modelName, syncedModels);
-  if (selectedModelName && !state.models.some((model) => model.id === `${id}:${selectedModelName}`)) {
-    upsertModel(activeProvider, { id: selectedModelName, displayName: selectedModelName }, "自定义");
-  }
-  if (selectedModelName) state.settings.defaultModelId = `${id}:${selectedModelName}`;
-  ensureDefaultModelExists(id);
-  state.settings.onboardingCompleted = true;
-  onboardingForm.apiKey = "";
-  onboardingForm.showKey = false;
-  onboardingForm.modelId = "";
-  activeTab.value = "chat";
-
-  if (!state.selectedConversationId) {
-    newConversation();
-  }
-
-  showToast(toast);
 }
 
 function chooseInitialModel(requestedModelName: string, models: ProviderModelSummary[]): string | null {
@@ -601,7 +677,23 @@ function ensureConversation(): Conversation | null {
   return conversation;
 }
 
+function openModelSheet(): void {
+  modelSheetSearch.value = "";
+  modelSheetOpen.value = true;
+}
+
 function selectModel(model: ModelConfig): void {
+  if (!isModelEnabled(model)) {
+    showToast("模型已禁用");
+    return;
+  }
+
+  const provider = state.providers.find((item) => item.id === model.providerId);
+  if (!provider?.enabled) {
+    showToast("模型所属 Provider 已禁用");
+    return;
+  }
+
   const conversation = currentConversation.value;
   if (conversation) {
     conversation.modelId = model.id;
@@ -610,6 +702,7 @@ function selectModel(model: ModelConfig): void {
   }
   state.settings.defaultModelId = model.id;
   modelSheetOpen.value = false;
+  modelSheetSearch.value = "";
   showToast(`已切换到 ${model.displayName}`);
 }
 
@@ -700,31 +793,30 @@ function renderPromptTemplate(content: string): string {
   return content.replace(/\{\{\s*(date|time|model|provider|conversation_title)\s*\}\}/g, (_, key: string) => replacements[key] ?? "");
 }
 
-async function sendMessage(forcedText?: string, forcedAttachments?: MessageAttachment[]): Promise<void> {
+function submitDraft(): void {
   if (activeAbort.value) {
     stopStreaming();
     return;
   }
 
-  const text = (forcedText ?? draft.value).trim();
-  const outgoingAttachments = clone(forcedAttachments ?? pendingAttachments.value);
-  if (!text) return;
-  const conversation = ensureConversation();
-  if (!conversation) return;
-  const model = currentModel.value;
-  const provider = currentProvider.value;
-  if (!model || !provider) {
-    openProviders();
-    showToast("请先添加 Provider 和模型");
-    return;
-  }
-  if (outgoingAttachments.some((attachment) => attachment.kind === "image") && !model.supportsVision) {
-    showToast("当前模型未启用视觉能力，请在模型详情中开启后再发送图片");
+  sendMessage();
+}
+
+function sendMessage(): void {
+  if (activeAbort.value) {
+    stopStreaming();
     return;
   }
 
-  draft.value = "";
-  pendingAttachments.value = [];
+  const text = draft.value.trim();
+  const outgoingAttachments = clone(pendingAttachments.value);
+  if (!text) return;
+  const conversation = ensureConversation();
+  if (!conversation) return;
+  const config = resolveChatConfig(outgoingAttachments);
+  if (!config) return;
+
+  clearDraftComposer();
   contextMenu.open = false;
 
   const now = new Date().toISOString();
@@ -751,13 +843,81 @@ async function sendMessage(forcedText?: string, forcedAttachments?: MessageAttac
   state.messages[conversation.id] = [...(state.messages[conversation.id] ?? []), userMessage, assistantMessage];
   conversation.updatedAt = now;
   if (conversation.title === "新会话") conversation.title = titleFromPrompt(text);
-  await nextTick(scrollToBottom);
+  void streamAssistantResponse(conversation, userMessage, assistantMessage, config);
+}
 
-  if (!provider?.enabled || !provider.hasApiKey) {
+function submitInlineEdit(): void {
+  const message = editingMessageId.value ? findMessage(editingMessageId.value) : undefined;
+  if (!message) return cancelInlineEdit();
+
+  const content = inlineEditDraft.value.trim();
+  if (!content) return;
+
+  if (message.role === "assistant") {
+    message.content = content;
+    message.status = "done";
+    message.errorCode = undefined;
+    message.updatedAt = new Date().toISOString();
+    truncateMessagesAfter(message);
+    cancelInlineEdit();
+    showToast("消息已更新");
+    return;
+  }
+
+  const started = resendMessageInPlace(message, { content, attachments: clone(message.attachments ?? []) });
+  if (started) cancelInlineEdit();
+}
+
+function clearDraftComposer(): void {
+  draft.value = "";
+  pendingAttachments.value = [];
+  void nextTick(() => resizeDraftInput());
+}
+
+function cancelInlineEdit(): void {
+  editingMessageId.value = null;
+  inlineEditDraft.value = "";
+}
+
+function resolveChatConfig(outgoingAttachments: MessageAttachment[]): ChatConfig | null {
+  const model = currentModel.value;
+  const provider = currentProvider.value;
+  if (!model || !provider) {
+    openProviders();
+    showToast("请先添加 Provider 和模型");
+    return null;
+  }
+  if (outgoingAttachments.some((attachment) => attachment.kind === "image") && !model.supportsVision) {
+    showToast("当前模型未启用视觉能力，请在模型详情中开启后再发送图片");
+    return null;
+  }
+  return { model, provider };
+}
+
+async function streamAssistantResponse(
+  conversation: Conversation,
+  userMessage: ChatMessage,
+  assistantMessage: ChatMessage,
+  config: ChatConfig,
+  options: { scrollToBottom?: boolean } = {},
+): Promise<void> {
+  const scrollToLatest = options.scrollToBottom ?? true;
+  const now = new Date().toISOString();
+  assistantMessage.content = "";
+  assistantMessage.status = "streaming";
+  assistantMessage.errorCode = undefined;
+  assistantMessage.updatedAt = now;
+  conversation.updatedAt = now;
+  activeStreamScrollToBottom.value = scrollToLatest;
+  if (scrollToLatest) await nextTick(scrollToBottom);
+  else await nextTick();
+
+  if (!config.provider.enabled || !config.provider.hasApiKey) {
     assistantMessage.status = "failed";
     assistantMessage.errorCode = "auth.invalid_key";
     assistantMessage.content = "当前模型的 Provider 未配置有效 API Key。请前往 Provider 配置补全密钥后重试。";
     assistantMessage.updatedAt = new Date().toISOString();
+    activeStreamScrollToBottom.value = true;
     showToast("Provider 需要有效 API Key");
     return;
   }
@@ -772,10 +932,10 @@ async function sendMessage(forcedText?: string, forcedAttachments?: MessageAttac
     await streamChatCompletion(
       {
         requestId,
-        provider,
-        model,
+        provider: config.provider,
+        model: config.model,
         messages: buildContextMessages(conversation.id, userMessage),
-        parameters: model.defaultParameters,
+        parameters: config.model.defaultParameters,
       },
       (event) => {
         handleStreamEvent(event, assistantMessage);
@@ -797,8 +957,9 @@ async function sendMessage(forcedText?: string, forcedAttachments?: MessageAttac
     activeAbort.value = null;
     activeAssistantId.value = null;
     activeRequestId.value = null;
+    activeStreamScrollToBottom.value = true;
     conversation.updatedAt = new Date().toISOString();
-    await nextTick(scrollToBottom);
+    if (scrollToLatest) await nextTick(scrollToBottom);
   }
 }
 
@@ -824,10 +985,13 @@ function stopStreaming(): void {
   showToast("已停止生成");
 }
 
-function buildContextMessages(conversationId: string, latestUserMessage: ChatMessage): ChatMessage[] {
+function buildContextMessages(conversationId: string, latestUserMessage: ChatMessage, throughMessageId = latestUserMessage.id): ChatMessage[] {
   const conversation = state.conversations.find((item) => item.id === conversationId);
   const contextLimit = clampContextMessageLimit(state.settings.contextMessageLimit);
-  const messages = (state.messages[conversationId] ?? [])
+  const conversationMessages = state.messages[conversationId] ?? [];
+  const throughIndex = conversationMessages.findIndex((message) => message.id === throughMessageId);
+  const scopedMessages = throughIndex >= 0 ? conversationMessages.slice(0, throughIndex + 1) : conversationMessages;
+  const messages = scopedMessages
     .filter((message) => message.status === "done" && (message.role === "user" || message.role === "assistant"))
     .slice(-contextLimit);
 
@@ -864,7 +1028,7 @@ function handleStreamEvent(event: ChatStreamEvent, assistantMessage: ChatMessage
   if (event.type === "content") {
     assistantMessage.content += event.text;
     assistantMessage.updatedAt = new Date().toISOString();
-    scrollToBottom();
+    if (activeStreamScrollToBottom.value) scrollToBottom();
     return;
   }
 
@@ -924,40 +1088,152 @@ function recoveryActionLabel(code?: string): string {
 
 function openRecoveryAction(code?: string): void {
   if (code?.startsWith("model.")) {
-    modelSheetOpen.value = true;
+    openModelSheet();
     return;
   }
   openProviders();
 }
 
-function retryMessage(): void {
-  const targetId = contextMenu.messageId;
-  const conversation = currentConversation.value;
-  if (!conversation || !targetId) return;
+function retrySourceMessage(message: ChatMessage): ChatMessage | undefined {
+  if (message.role === "user") return message;
 
-  const messages = state.messages[conversation.id] ?? [];
-  const targetIndex = messages.findIndex((message) => message.id === targetId);
-  const previousUser = [...messages.slice(0, targetIndex)].reverse().find((message) => message.role === "user");
-  contextMenu.open = false;
-  if (previousUser) void sendMessage(previousUser.content, previousUser.attachments);
-}
-
-function retryFailedMessage(message: ChatMessage): void {
-  const conversation = state.conversations.find((item) => item.id === message.conversationId);
-  if (!conversation) return;
-
-  const messages = state.messages[conversation.id] ?? [];
+  const messages = state.messages[message.conversationId] ?? [];
   const targetIndex = messages.findIndex((item) => item.id === message.id);
-  const previousUser = [...messages.slice(0, targetIndex)].reverse().find((item) => item.role === "user");
-  if (previousUser) void sendMessage(previousUser.content, previousUser.attachments);
+  if (targetIndex < 0) return undefined;
+  return [...messages.slice(0, targetIndex)].reverse().find((item) => item.role === "user");
 }
 
-async function copyMessage(): Promise<void> {
-  const message = findMessage(contextMenu.messageId);
-  if (!message) return;
-  await navigator.clipboard.writeText(message.content);
+function editableSourceMessage(message: ChatMessage): ChatMessage | undefined {
+  if (message.role === "user" || message.role === "assistant") return message;
+  return undefined;
+}
+
+function pairedAssistantMessage(userMessage: ChatMessage): ChatMessage | undefined {
+  const messages = state.messages[userMessage.conversationId] ?? [];
+  const userIndex = messages.findIndex((item) => item.id === userMessage.id);
+  if (userIndex < 0) return undefined;
+
+  for (const item of messages.slice(userIndex + 1)) {
+    if (item.role === "user") return undefined;
+    if (item.role === "assistant") return item;
+  }
+
+  return undefined;
+}
+
+function ensureAssistantResponseSlot(userMessage: ChatMessage): ChatMessage | undefined {
+  const existing = pairedAssistantMessage(userMessage);
+  if (existing) return existing;
+
+  const messages = [...(state.messages[userMessage.conversationId] ?? [])];
+  const userIndex = messages.findIndex((item) => item.id === userMessage.id);
+  if (userIndex < 0) return undefined;
+
+  const now = new Date().toISOString();
+  const assistantMessage: ChatMessage = {
+    id: `msg-${crypto.randomUUID()}`,
+    conversationId: userMessage.conversationId,
+    role: "assistant",
+    content: "",
+    status: "streaming",
+    createdAt: now,
+    updatedAt: now,
+  };
+  messages.splice(userIndex + 1, 0, assistantMessage);
+  state.messages[userMessage.conversationId] = messages;
+  return assistantMessage;
+}
+
+function truncateMessagesAfter(message: ChatMessage): void {
+  const messages = state.messages[message.conversationId] ?? [];
+  const index = messages.findIndex((item) => item.id === message.id);
+  if (index < 0 || index === messages.length - 1) return;
+  state.messages[message.conversationId] = messages.slice(0, index + 1);
+}
+
+function canRetryMessage(message: ChatMessage): boolean {
+  return message.status !== "streaming" && Boolean(retrySourceMessage(message));
+}
+
+function retryMessage(message?: ChatMessage): void {
+  const target = message ?? findMessage(contextMenu.messageId);
+  if (!target) return;
+
+  contextMenu.open = false;
+  resendMessageInPlace(target);
+}
+
+function resendMessageInPlace(target: ChatMessage, replacement?: { content: string; attachments: MessageAttachment[] }): boolean {
+  if (activeAbort.value) {
+    stopStreaming();
+    return false;
+  }
+
+  const conversation = state.conversations.find((item) => item.id === target.conversationId);
+  const source = retrySourceMessage(target);
+  if (!conversation || !source) return false;
+
+  const content = (replacement?.content ?? source.content).trim();
+  const outgoingAttachments = clone(replacement?.attachments ?? source.attachments ?? []);
+  if (!content) return false;
+
+  state.selectedConversationId = conversation.id;
+  const config = resolveChatConfig(outgoingAttachments);
+  if (!config) return false;
+
+  truncateMessagesAfter(target.role === "assistant" ? target : source);
+
+  const assistantMessage = target.role === "assistant" ? target : ensureAssistantResponseSlot(source);
+  if (!assistantMessage) return false;
+
+  if (replacement) {
+    source.content = content;
+    source.attachments = outgoingAttachments.length ? outgoingAttachments : undefined;
+    source.status = "done";
+    source.errorCode = undefined;
+    source.updatedAt = new Date().toISOString();
+  }
+
+  contextMenu.open = false;
+  void streamAssistantResponse(conversation, source, assistantMessage, config, { scrollToBottom: false });
+  return true;
+}
+
+async function copyMessage(message?: ChatMessage): Promise<void> {
+  const target = message ?? findMessage(contextMenu.messageId);
+  if (!target?.content.trim()) return;
+  await navigator.clipboard.writeText(target.content);
   contextMenu.open = false;
   showToast("消息已复制");
+}
+
+function editMessage(message?: ChatMessage): void {
+  const target = message ?? findMessage(contextMenu.messageId);
+  if (!target || target.status === "streaming") return;
+  const source = editableSourceMessage(target);
+  if (!source) return;
+  editingMessageId.value = source.id;
+  inlineEditDraft.value = source.content;
+  contextMenu.open = false;
+  void focusInlineEditInput();
+}
+
+async function focusDraftInput(): Promise<void> {
+  await nextTick();
+  resizeDraftInput();
+  const input = draftInput.value;
+  if (!input) return;
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+
+async function focusInlineEditInput(): Promise<void> {
+  await nextTick();
+  const input = document.querySelector<HTMLTextAreaElement>(".inline-edit-input");
+  if (!input) return;
+  resizeInlineEditInput(input);
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
 }
 
 function quoteMessage(): void {
@@ -965,7 +1241,12 @@ function quoteMessage(): void {
   if (!message) return;
   draft.value = `> ${message.content.replace(/\n/g, "\n> ")}\n\n`;
   contextMenu.open = false;
+  void focusDraftInput();
   showToast("已引用到输入框");
+}
+
+function canEditMessage(message: ChatMessage): boolean {
+  return message.status !== "streaming" && Boolean(editableSourceMessage(message)?.content.trim());
 }
 
 function deleteMessage(): void {
@@ -1013,14 +1294,41 @@ function scrollToBottom(): void {
 
 function resizeDraft(event: Event): void {
   const el = event.target as HTMLTextAreaElement;
+  resizeDraftInput(el);
+}
+
+function resizeDraftInput(target?: HTMLTextAreaElement | null): void {
+  const el = target ?? draftInput.value;
+  if (!el) return;
   el.style.height = "auto";
   el.style.height = `${Math.min(el.scrollHeight, 112)}px`;
+}
+
+function resizeInlineEdit(event: Event): void {
+  resizeInlineEditInput(event.target as HTMLTextAreaElement);
+}
+
+function resizeInlineEditInput(target: HTMLTextAreaElement): void {
+  target.style.height = "auto";
+  target.style.height = `${Math.min(target.scrollHeight, 180)}px`;
 }
 
 function handleDraftKeydown(event: KeyboardEvent): void {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
-    void sendMessage();
+    submitDraft();
+  }
+}
+
+function handleInlineEditKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    cancelInlineEdit();
+    return;
+  }
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    submitInlineEdit();
   }
 }
 
@@ -1302,6 +1610,7 @@ function upsertModel(provider: ProviderConfig, summary: ProviderModelSummary, co
     name: summary.id,
     displayName: summary.displayName || summary.id,
     version: summary.id,
+    enabled: existing?.enabled ?? true,
     supportsStreaming: existing?.supportsStreaming ?? true,
     supportsVision: existing?.supportsVision ?? false,
     supportsTools: existing?.supportsTools ?? false,
@@ -1322,13 +1631,7 @@ async function syncProviderModels(provider: ProviderConfig): Promise<ProviderMod
   provider.status = "testing";
   try {
     const models = await listProviderModels(provider);
-    replaceSyncedProviderModels(provider, models);
-    const checkedAt = new Date().toISOString();
-    provider.status = "online";
-    provider.hasApiKey = true;
-    provider.lastCheckedAt = checkedAt;
-    provider.updatedAt = checkedAt;
-    ensureDefaultModelExists(provider.id);
+    applySyncedProviderModels(provider, models);
     return models;
   } catch (error) {
     const checkedAt = new Date().toISOString();
@@ -1337,6 +1640,16 @@ async function syncProviderModels(provider: ProviderConfig): Promise<ProviderMod
     provider.updatedAt = checkedAt;
     throw error;
   }
+}
+
+function applySyncedProviderModels(provider: ProviderConfig, models: ProviderModelSummary[]): void {
+  replaceSyncedProviderModels(provider, models);
+  const checkedAt = new Date().toISOString();
+  provider.status = "online";
+  provider.hasApiKey = true;
+  provider.lastCheckedAt = checkedAt;
+  provider.updatedAt = checkedAt;
+  ensureDefaultModelExists(provider.id);
 }
 
 function replaceSyncedProviderModels(provider: ProviderConfig, models: ProviderModelSummary[]): void {
@@ -1352,9 +1665,10 @@ function replaceSyncedProviderModels(provider: ProviderConfig, models: ProviderM
 }
 
 function ensureDefaultModelExists(preferredProviderId?: string): void {
-  if (state.settings.defaultModelId && state.models.some((model) => model.id === state.settings.defaultModelId)) return;
-  const preferredProviderModel = preferredProviderId ? state.models.find((model) => model.providerId === preferredProviderId) : undefined;
-  state.settings.defaultModelId = preferredProviderModel?.id ?? state.models[0]?.id ?? null;
+  const models = state.models.filter((model) => isSelectableModel(model));
+  if (state.settings.defaultModelId && models.some((model) => model.id === state.settings.defaultModelId)) return;
+  const preferredProviderModel = preferredProviderId ? models.find((model) => model.providerId === preferredProviderId) : undefined;
+  state.settings.defaultModelId = preferredProviderModel?.id ?? models[0]?.id ?? null;
 }
 
 async function refreshAllProviderModels(showResult = true): Promise<void> {
@@ -1404,11 +1718,25 @@ async function disableProvider(providerId: string): Promise<void> {
   showToast(`已禁用 ${provider.name}`);
 }
 
+function isModelEnabled(model: ModelConfig): boolean {
+  return model.enabled !== false;
+}
+
+function isSelectableModel(model: ModelConfig): boolean {
+  const provider = state.providers.find((item) => item.id === model.providerId);
+  return isModelEnabled(model) && Boolean(provider?.enabled);
+}
+
 function modelMatchesFilter(model: ModelConfig): boolean {
   if (modelFilter.value === "all") return true;
   if (modelFilter.value === "chat") return true;
   if (modelFilter.value === "vision") return model.supportsVision;
   return model.supportsTools;
+}
+
+function modelMatchesSearch(model: ModelConfig, provider: ProviderConfig, keyword: string): boolean {
+  if (!keyword) return true;
+  return [model.displayName, model.name, model.version, model.contextWindow, provider.name].join(" ").toLowerCase().includes(keyword);
 }
 
 function openModelDetail(model: ModelConfig): void {
@@ -1417,15 +1745,62 @@ function openModelDetail(model: ModelConfig): void {
   detailSheetOpen.value = true;
 }
 
+function toggleModelEnabled(model: ModelConfig): void {
+  model.enabled = !isModelEnabled(model);
+  if (!model.enabled && state.settings.defaultModelId === model.id) {
+    state.settings.defaultModelId = null;
+  }
+  ensureDefaultModelExists(model.providerId);
+  showToast(`${model.enabled ? "已启用" : "已禁用"} ${model.displayName}`);
+}
+
+function removeModel(model: ModelConfig): void {
+  if (!window.confirm(`移除模型「${model.displayName}」？此操作不会删除 Provider 配置。`)) return;
+
+  const provider = state.providers.find((item) => item.id === model.providerId);
+  if (provider?.syncedModelIds) {
+    provider.syncedModelIds = provider.syncedModelIds.filter((id) => id !== model.name);
+  }
+
+  state.models = state.models.filter((item) => item.id !== model.id);
+  if (state.settings.defaultModelId === model.id) {
+    state.settings.defaultModelId = null;
+  }
+  ensureDefaultModelExists(model.providerId);
+
+  const replacement = state.settings.defaultModelId ? state.models.find((item) => item.id === state.settings.defaultModelId) : undefined;
+  if (replacement) {
+    const updatedAt = new Date().toISOString();
+    state.conversations.forEach((conversation) => {
+      if (conversation.modelId !== model.id) return;
+      conversation.modelId = replacement.id;
+      conversation.providerId = replacement.providerId;
+      conversation.updatedAt = updatedAt;
+    });
+  }
+
+  if (detailModel.value?.id === model.id) {
+    detailModel.value = null;
+    detailSheetOpen.value = false;
+  }
+
+  showToast(`已移除 ${model.displayName}`);
+}
+
 function saveModelAsDefault(): void {
-  if (!detailModel.value) return;
-  detailModel.value.defaultParameters = { ...detailParameters };
-  selectModel(detailModel.value);
+  const model = detailModel.value;
+  if (!model) return;
+  if (!isSelectableModel(model)) {
+    showToast(isModelEnabled(model) ? "模型所属 Provider 已禁用" : "模型已禁用");
+    return;
+  }
+  model.defaultParameters = { ...detailParameters };
+  selectModel(model);
   detailSheetOpen.value = false;
 }
 
 function capabilityTags(model: ModelConfig): string[] {
-  const tags = ["流式"];
+  const tags = isModelEnabled(model) ? ["流式"] : ["已禁用", "流式"];
   if (model.supportsVision) tags.push("视觉");
   if (model.supportsTools) tags.push("工具调用");
   tags.push(model.contextWindow);
@@ -1473,13 +1848,24 @@ function normalizeImportedState(imported: Partial<PersistedState>): PersistedSta
   return {
     schemaVersion: 2,
     providers: imported.providers ?? [],
-    models: imported.models ?? [],
+    models: (imported.models ?? []).map(normalizeModel),
     conversations: imported.conversations ?? [],
     messages: imported.messages ?? {},
     promptTemplates: imported.promptTemplates ?? [],
     settings: normalizeSettings(imported.settings),
     selectedConversationId: imported.selectedConversationId ?? null,
     exportedAt: imported.exportedAt,
+  };
+}
+
+function normalizeModel(model: ModelConfig): ModelConfig {
+  return {
+    ...model,
+    enabled: model.enabled ?? true,
+    defaultParameters: {
+      ...defaultParameters,
+      ...(model.defaultParameters ?? {}),
+    },
   };
 }
 
@@ -1647,15 +2033,38 @@ function showToast(text: string): void {
 
           <label class="field onboarding-field">
             <span>备用模型 ID</span>
-            <input
-              v-model="onboardingForm.modelId"
-              type="text"
-              placeholder="例如：deepseek/deepseek-v4-flash"
-              autocomplete="off"
-              autocapitalize="off"
-              spellcheck="false"
-            />
-            <small>可选；API 未返回模型列表时作为默认模型使用。</small>
+            <span class="model-id-control">
+              <input
+                v-model="onboardingForm.modelId"
+                type="text"
+                list="onboarding-model-options"
+                placeholder="例如：deepseek/deepseek-v4-flash"
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+              />
+              <button class="model-fetch-btn" type="button" :disabled="onboardingSyncingModels" @click="fetchOnboardingModels">
+                <RefreshCw :class="{ spin: onboardingSyncingModels }" :size="15" />
+                {{ onboardingSyncingModels ? "获取中" : "获取模型" }}
+              </button>
+            </span>
+            <datalist id="onboarding-model-options">
+              <option v-for="model in onboardingModels" :key="model.id" :value="model.id">{{ model.displayName }}</option>
+            </datalist>
+            <div v-if="onboardingModels.length" class="onboarding-model-list" aria-label="已获取模型">
+              <button v-for="model in onboardingModels.slice(0, 6)" :key="model.id" type="button" @click="onboardingForm.modelId = model.id">
+                {{ model.displayName }}
+              </button>
+            </div>
+            <small>
+              {{
+                onboardingModelsFetched
+                  ? onboardingModels.length
+                    ? `已获取 ${onboardingModels.length} 个模型，可从候选中切换。`
+                    : "API 未返回模型列表，可手动填写备用模型 ID。"
+                  : "可选；API 未返回模型列表时作为默认模型使用。"
+              }}
+            </small>
           </label>
 
           <div class="onboarding-actions">
@@ -1673,7 +2082,7 @@ function showToast(text: string): void {
           </button>
           <div class="title-area">
             <div class="conv-title">{{ currentConversation?.title ?? "AI 助手" }}</div>
-            <button class="model-badge" type="button" @click="modelSheetOpen = true">
+            <button class="model-badge" type="button" @click="openModelSheet">
               {{ currentModel?.displayName ?? "选择模型" }}
               <ChevronRight :size="12" />
             </button>
@@ -1712,33 +2121,72 @@ function showToast(text: string): void {
             @pointerup="cancelLongPress"
             @pointerleave="cancelLongPress"
           >
-            <div class="bubble">
-              <div v-if="message.attachments?.length" class="message-attachments">
-                <div v-for="attachment in message.attachments" :key="attachment.id" class="message-attachment" :class="attachment.kind">
-                  <img v-if="attachment.kind === 'image' && attachment.dataUrl" :src="attachment.dataUrl" :alt="attachment.name" />
-                  <FileText v-else :size="15" />
-                  <span>{{ attachment.name }}</span>
+            <template v-if="editingMessageId === message.id">
+              <div class="inline-edit" @pointerdown.stop>
+                <div v-if="message.attachments?.length" class="message-attachments">
+                  <div v-for="attachment in message.attachments" :key="attachment.id" class="message-attachment" :class="attachment.kind">
+                    <img v-if="attachment.kind === 'image' && attachment.dataUrl" :src="attachment.dataUrl" :alt="attachment.name" />
+                    <FileText v-else :size="15" />
+                    <span>{{ attachment.name }}</span>
+                  </div>
+                </div>
+                <textarea
+                  v-model="inlineEditDraft"
+                  class="inline-edit-input"
+                  rows="1"
+                  aria-label="编辑消息"
+                  @input="resizeInlineEdit"
+                  @keydown="handleInlineEditKeydown"
+                ></textarea>
+                <div class="inline-edit-actions">
+                  <button type="button" aria-label="取消编辑" title="取消" @click.stop="cancelInlineEdit">
+                    <X :size="14" />
+                  </button>
+                  <button type="button" class="confirm" aria-label="保存并重新发送" title="保存" :disabled="!inlineEditDraft.trim() || Boolean(activeAbort)" @click.stop="submitInlineEdit">
+                    <Check :size="14" />
+                  </button>
                 </div>
               </div>
-              <div v-if="message.content.trim()" class="markdown-body" v-html="renderMarkdown(message.content)"></div>
-              <span v-if="message.status === 'streaming' && message.id === activeAssistantId" class="streaming-cursor"></span>
-            </div>
-            <div v-if="message.status === 'failed'" class="error-recovery">
-              <span>{{ errorDescription(message.errorCode) }}</span>
-              <button type="button" @click.stop="retryFailedMessage(message)">重试</button>
-              <button v-if="shouldShowProviderAction(message.errorCode)" type="button" @click.stop="openRecoveryAction(message.errorCode)">
-                {{ recoveryActionLabel(message.errorCode) }}
-              </button>
-            </div>
-            <div class="message-meta">
-              <span>{{ formatMessageTime(message.createdAt) }}</span>
-              <span v-if="message.status === 'cancelled'">已停止</span>
-              <span v-if="message.status === 'failed'">{{ message.errorCode }}</span>
-            </div>
+            </template>
+            <template v-else>
+              <div class="bubble">
+                <div v-if="message.attachments?.length" class="message-attachments">
+                  <div v-for="attachment in message.attachments" :key="attachment.id" class="message-attachment" :class="attachment.kind">
+                    <img v-if="attachment.kind === 'image' && attachment.dataUrl" :src="attachment.dataUrl" :alt="attachment.name" />
+                    <FileText v-else :size="15" />
+                    <span>{{ attachment.name }}</span>
+                  </div>
+                </div>
+                <div v-if="message.content.trim()" class="markdown-body" v-html="renderMarkdown(message.content)"></div>
+                <span v-if="message.status === 'streaming' && message.id === activeAssistantId" class="streaming-cursor"></span>
+              </div>
+              <div class="message-actions" role="group" aria-label="消息操作">
+                <button type="button" aria-label="复制" title="复制" :disabled="!message.content.trim()" @click.stop="copyMessage(message)">
+                  <Copy :size="14" />
+                </button>
+                <button type="button" aria-label="编辑" title="编辑" :disabled="!canEditMessage(message)" @click.stop="editMessage(message)">
+                  <Pencil :size="14" />
+                </button>
+                <button class="retry-action" type="button" aria-label="重试" title="重试" :disabled="Boolean(activeAbort) || !canRetryMessage(message)" @click.stop="retryMessage(message)">
+                  <RotateCcw :size="14" />
+                </button>
+              </div>
+              <div v-if="message.status === 'failed'" class="error-recovery">
+                <span>{{ errorDescription(message.errorCode) }}</span>
+                <button v-if="shouldShowProviderAction(message.errorCode)" type="button" @click.stop="openRecoveryAction(message.errorCode)">
+                  {{ recoveryActionLabel(message.errorCode) }}
+                </button>
+              </div>
+              <div class="message-meta">
+                <span>{{ formatMessageTime(message.createdAt) }}</span>
+                <span v-if="message.status === 'cancelled'">已停止</span>
+                <span v-if="message.status === 'failed'">{{ message.errorCode }}</span>
+              </div>
+            </template>
           </article>
         </section>
 
-        <form class="input-area" @submit.prevent="sendMessage()">
+        <form class="input-area" @submit.prevent="submitDraft()">
           <div v-if="pendingAttachments.length" class="pending-attachments">
             <div v-for="attachment in pendingAttachments" :key="attachment.id" class="pending-attachment">
               <img v-if="attachment.kind === 'image' && attachment.dataUrl" :src="attachment.dataUrl" :alt="attachment.name" />
@@ -1753,6 +2201,7 @@ function showToast(text: string): void {
             <Paperclip :size="20" />
           </button>
           <textarea
+            ref="draftInput"
             v-model="draft"
             class="message-input"
             rows="1"
@@ -1785,6 +2234,11 @@ function showToast(text: string): void {
           </div>
         </header>
 
+        <label class="model-search">
+          <Search :size="16" />
+          <input v-model="modelSearch" type="search" placeholder="搜索模型或 Provider" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </label>
+
         <div class="segmented" role="tablist" aria-label="模型筛选">
           <button :class="{ active: modelFilter === 'all' }" type="button" @click="modelFilter = 'all'">全部</button>
           <button :class="{ active: modelFilter === 'chat' }" type="button" @click="modelFilter = 'chat'">对话</button>
@@ -1792,8 +2246,8 @@ function showToast(text: string): void {
           <button :class="{ active: modelFilter === 'tools' }" type="button" @click="modelFilter = 'tools'">工具</button>
         </div>
 
-        <section class="content scrollable">
-          <div v-if="modelGroups.length === 0" class="content-empty-state">
+        <section class="content scrollable models-content">
+          <div v-if="state.models.length === 0" class="content-empty-state">
             <Cpu :size="38" />
             <h2>还没有模型</h2>
             <p>保存 Provider API Key 后，应用会从配置的 Models Path 动态同步模型列表。</p>
@@ -1803,6 +2257,12 @@ function showToast(text: string): void {
             </button>
             <button v-else class="primary-action" type="button" @click="openProviders">添加 Provider</button>
           </div>
+          <div v-else-if="modelGroups.length === 0" class="content-empty-state">
+            <Search :size="38" />
+            <h2>没有匹配模型</h2>
+            <p>换一个关键词，或切回全部能力筛选。</p>
+            <button v-if="modelSearch" class="secondary-btn" type="button" @click="modelSearch = ''">清空搜索</button>
+          </div>
           <div v-for="group in modelGroups" :key="group.provider.id" class="provider-group">
             <div class="provider-group-header">
               <div class="provider-icon small" :class="providerClass(group.provider)">{{ providerInitial(group.provider) }}</div>
@@ -1810,25 +2270,51 @@ function showToast(text: string): void {
               <span class="provider-group-count">{{ group.models.length }} 个模型</span>
             </div>
 
-            <button
+            <div
               v-for="model in group.models"
               :key="model.id"
-              class="model-card"
-              :class="{ selected: model.id === state.settings.defaultModelId }"
-              type="button"
-              @click="openModelDetail(model)"
+              class="model-swipe"
+              :class="{ disabled: !isModelEnabled(model) }"
             >
-              <span>
-                <strong>{{ model.displayName }}</strong>
-                <small>{{ model.version }}</small>
-              </span>
-              <span class="check-circle"><Check v-if="model.id === state.settings.defaultModelId" :size="15" /></span>
-              <span class="cap-tags">
-                <span v-for="tag in capabilityTags(model)" :key="tag" class="cap-tag" :class="{ context: tag.includes('K') || tag.includes('M') }">
-                  {{ tag }}
-                </span>
-              </span>
-            </button>
+              <div class="model-swipe-track">
+                <button
+                  class="model-card"
+                  :class="{ selected: model.id === currentModel?.id, disabled: !isModelEnabled(model) }"
+                  type="button"
+                  @click="selectModel(model)"
+                >
+                  <span>
+                    <strong>{{ model.displayName }}</strong>
+                    <small>{{ model.version }}</small>
+                  </span>
+                  <span class="check-circle"><Check v-if="model.id === currentModel?.id" :size="15" /></span>
+                  <span class="cap-tags">
+                    <span
+                      v-for="tag in capabilityTags(model)"
+                      :key="tag"
+                      class="cap-tag"
+                      :class="{ context: tag.includes('K') || tag.includes('M'), disabled: tag === '已禁用' }"
+                    >
+                      {{ tag }}
+                    </span>
+                  </span>
+                </button>
+                <div class="model-swipe-actions" aria-label="模型操作">
+                  <button type="button" @click="openModelDetail(model)">
+                    <Pencil :size="15" />
+                    <span>编辑</span>
+                  </button>
+                  <button class="warning" type="button" @click="toggleModelEnabled(model)">
+                    <WifiOff :size="15" />
+                    <span>{{ isModelEnabled(model) ? "禁用" : "启用" }}</span>
+                  </button>
+                  <button class="danger" type="button" @click="removeModel(model)">
+                    <Trash2 :size="15" />
+                    <span>移除</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
       </template>
@@ -2067,14 +2553,24 @@ function showToast(text: string): void {
             <RefreshCw :size="18" />
           </button>
         </div>
-        <div v-if="state.models.length === 0" class="sheet-empty-state">
+        <label v-if="selectableModels.length" class="model-search sheet-search">
+          <Search :size="16" />
+          <input v-model="modelSheetSearch" type="search" placeholder="搜索模型或 Provider" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </label>
+        <div v-if="selectableModels.length === 0" class="sheet-empty-state">
           <Cpu :size="34" />
-          <strong>没有可选模型</strong>
-          <span>保存 Provider API Key 后会自动从 API 拉取模型列表。</span>
+          <strong>{{ state.models.length ? "没有启用的模型" : "没有可选模型" }}</strong>
+          <span>{{ state.models.length ? "请在模型页启用模型，或添加新的 Provider。" : "保存 Provider API Key 后会自动从 API 拉取模型列表。" }}</span>
           <button v-if="syncableProviders.length" class="primary-action" type="button" :disabled="syncingAllProviders" @click="refreshAllProviderModels()">刷新模型</button>
           <button v-else class="primary-action" type="button" @click="openProviders">添加 Provider</button>
         </div>
-        <button v-for="model in state.models" :key="model.id" class="model-option" :class="{ selected: model.id === currentModel?.id }" type="button" @click="selectModel(model)">
+        <div v-else-if="modelSheetModels.length === 0" class="sheet-empty-state">
+          <Search :size="34" />
+          <strong>没有匹配模型</strong>
+          <span>换一个关键词，或清空搜索后重新选择。</span>
+          <button class="secondary-btn" type="button" @click="modelSheetSearch = ''">清空搜索</button>
+        </div>
+        <button v-for="model in modelSheetModels" :key="model.id" class="model-option" :class="{ selected: model.id === currentModel?.id }" type="button" @click="selectModel(model)">
           <span class="provider-icon small" :class="providerClass(state.providers.find((item) => item.id === model.providerId) ?? state.providers[0])">
             {{ providerName(model.providerId).slice(0, 1) }}
           </span>
@@ -2226,8 +2722,9 @@ function showToast(text: string): void {
       </section>
 
       <div v-if="contextMenu.open" class="context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }">
-        <button type="button" @click="copyMessage"><Copy :size="15" /> 复制</button>
-        <button type="button" @click="retryMessage"><RotateCcw :size="15" /> 重试</button>
+        <button type="button" @click="copyMessage()"><Copy :size="15" /> 复制</button>
+        <button type="button" @click="editMessage()"><Pencil :size="15" /> 编辑</button>
+        <button type="button" @click="retryMessage()"><RotateCcw :size="15" /> 重试</button>
         <button type="button" @click="quoteMessage"><Quote :size="15" /> 引用</button>
         <button class="danger" type="button" @click="deleteMessage"><Trash2 :size="15" /> 删除</button>
       </div>

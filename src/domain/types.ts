@@ -37,6 +37,7 @@ export interface ModelConfig {
   name: string;
   displayName: string;
   version: string;
+  enabled: boolean;
   supportsStreaming: boolean;
   supportsVision: boolean;
   supportsTools: boolean;

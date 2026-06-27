@@ -14,7 +14,7 @@
   --shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   --font-display: "PingFang SC", "Heiti SC", "STHeiti", "Hiragino Sans GB", "Noto Sans CJK SC", -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
   --font-body: "PingFang SC", "Heiti SC", "STHeiti", "Hiragino Sans GB", "Noto Sans CJK SC", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, -apple-system, BlinkMacSystemFont, "PingFang SC", "Heiti SC", "STHeiti", "Hiragino Sans GB", "Noto Sans CJK SC", monospace;
   color: var(--fg);
   background: var(--app-bg);
   font-family: var(--font-body);
@@ -34,15 +34,19 @@
 html,
 body,
 #app {
+  width: 100%;
+  max-width: 100%;
   min-width: 100%;
   min-height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
   margin: 0;
   background: var(--app-bg);
   overflow: hidden;
+  overflow-x: hidden;
   overscroll-behavior: none;
 }
 
@@ -53,6 +57,12 @@ select {
   font: inherit;
 }
 
+input,
+textarea,
+select {
+  font-size: max(16px, 1em);
+}
+
 button {
   color: inherit;
   cursor: pointer;
@@ -61,8 +71,12 @@ button {
 .glosc-app {
   --keyboard-inset: 0px;
   --app-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
   min-height: var(--app-height);
   display: flex;
+  justify-content: center;
+  overflow: hidden;
   background: var(--app-bg);
   color: var(--fg);
 }
@@ -92,7 +106,8 @@ button {
 }
 
 .app-shell {
-  width: 100%;
+  width: min(100%, 480px);
+  max-width: 100%;
   min-width: 0;
   height: var(--app-height);
   min-height: 0;
@@ -115,11 +130,15 @@ button {
   position: absolute;
   inset: 0;
   z-index: 95;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 18px;
   padding: calc(24px + env(safe-area-inset-top, 0px)) 18px calc(18px + env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
+  overflow-x: hidden;
   background:
     linear-gradient(180deg, color-mix(in oklch, var(--accent) 9%, transparent), transparent 34%),
     var(--bg);
@@ -166,6 +185,9 @@ button {
 }
 
 .onboarding-form {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: grid;
   gap: 14px;
 }
@@ -213,6 +235,7 @@ button {
 }
 
 .onboarding-field {
+  min-width: 0;
   margin-bottom: 0;
 }
 
@@ -232,6 +255,7 @@ button {
 }
 
 .onboarding-actions {
+  min-width: 0;
   display: grid;
   gap: 10px;
   padding-top: 4px;
@@ -464,6 +488,8 @@ button {
 
 .bubble {
   position: relative;
+  width: fit-content;
+  max-width: 100%;
   padding: 12px 16px;
   border-radius: 18px;
   font-size: 15px;
@@ -472,12 +498,14 @@ button {
 }
 
 .message.user .bubble {
+  align-self: flex-end;
   border-bottom-right-radius: 6px;
   background: var(--accent);
   color: oklch(100% 0 0);
 }
 
 .message.assistant .bubble {
+  align-self: flex-start;
   border: 1px solid var(--border);
   border-bottom-left-radius: 6px;
   background: var(--surface);
@@ -487,6 +515,74 @@ button {
 .message.failed .bubble {
   border-color: color-mix(in oklch, var(--danger) 32%, transparent);
   background: color-mix(in oklch, var(--danger) 8%, var(--surface));
+}
+
+.inline-edit {
+  width: min(100%, 320px);
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.message.user .inline-edit {
+  align-self: flex-end;
+  border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
+  background: color-mix(in oklch, var(--accent) 7%, var(--surface));
+}
+
+.message.assistant .inline-edit {
+  align-self: flex-start;
+}
+
+.inline-edit-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  max-height: 180px;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  outline: 0;
+  padding: 9px 10px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.inline-edit-input:focus {
+  border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.inline-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.inline-edit-actions button {
+  width: 30px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.inline-edit-actions button.confirm {
+  border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+  color: var(--accent);
+}
+
+.inline-edit-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .message-attachments {
@@ -659,12 +755,71 @@ button {
 }
 
 .message.user .message-meta {
+  align-self: flex-end;
   justify-content: flex-end;
+}
+
+.message.assistant .message-meta {
+  align-self: flex-start;
+}
+
+.message-actions {
+  max-width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 0 2px;
+}
+
+.message.user .message-actions {
+  align-self: flex-end;
+  justify-content: flex-end;
+}
+
+.message.assistant .message-actions {
+  align-self: flex-start;
+}
+
+.message-actions button {
+  width: 30px;
+  height: 28px;
+  min-width: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  line-height: 1;
+}
+
+.message-actions button:active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.message-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.message.user .message-actions button {
+  border-color: color-mix(in oklch, var(--accent) 22%, var(--border));
+  background: color-mix(in oklch, var(--accent) 8%, var(--surface));
+  color: var(--accent);
+}
+
+.message.failed .message-actions .retry-action:not(:disabled) {
+  border-color: color-mix(in oklch, var(--danger) 32%, transparent);
+  color: var(--danger);
 }
 
 .error-recovery {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
   margin-top: 6px;
@@ -820,7 +975,7 @@ button {
   padding: 9px 13px;
   background: var(--surface);
   color: var(--fg);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.35;
 }
 
@@ -887,6 +1042,10 @@ button {
   touch-action: pan-y;
 }
 
+.models-content {
+  touch-action: auto;
+}
+
 .content-empty-state {
   min-height: 320px;
   display: flex;
@@ -920,6 +1079,34 @@ button {
   margin: 0 0 6px;
   font-size: 14px;
   line-height: 1.5;
+}
+
+.model-search {
+  flex: 0 0 auto;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 16px 0;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.model-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+}
+
+.sheet-search {
+  margin: 2px 0 12px;
+  background: var(--bg);
 }
 
 .segmented {
@@ -970,27 +1157,89 @@ button {
 .provider-group-count {
   margin-left: auto;
   color: var(--muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 12px;
+}
+
+.model-swipe {
+  --model-actions-width: 198px;
+  width: 100%;
+  margin-bottom: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 16px;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: none;
+}
+
+.model-swipe::-webkit-scrollbar {
+  display: none;
+}
+
+.model-swipe-track {
+  width: calc(100% + var(--model-actions-width));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--model-actions-width);
+  align-items: stretch;
 }
 
 .model-card {
   width: 100%;
+  min-height: 108px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 24px;
   gap: 9px 12px;
   padding: 14px;
-  margin-bottom: 10px;
   border: 1px solid var(--border);
   border-radius: 16px;
   background: var(--surface);
   color: var(--fg);
   text-align: left;
+  scroll-snap-align: start;
 }
 
 .model-card.selected {
   border-color: var(--accent);
   background: color-mix(in oklch, var(--accent) 5%, var(--surface));
+}
+
+.model-card.disabled {
+  opacity: 0.58;
+}
+
+.model-swipe-actions {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 60px);
+  gap: 6px;
+  padding-left: 6px;
+  scroll-snap-align: end;
+}
+
+.model-swipe-actions button {
+  min-width: 0;
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.model-swipe-actions button.warning {
+  color: var(--warn);
+}
+
+.model-swipe-actions button.danger {
+  color: var(--danger);
 }
 
 .model-card strong,
@@ -1010,7 +1259,7 @@ button {
 .conversation-item small {
   display: block;
   color: var(--muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -1056,7 +1305,12 @@ button {
 .cap-tag.context {
   background: color-mix(in oklch, var(--muted) 12%, transparent);
   color: var(--muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
+}
+
+.cap-tag.disabled {
+  background: color-mix(in oklch, var(--warn) 14%, transparent);
+  color: var(--warn);
 }
 
 .model-capability-editor {
@@ -1188,7 +1442,7 @@ button {
   gap: 6px;
   margin-top: 12px;
   color: var(--muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 12px;
 }
 
@@ -1618,7 +1872,7 @@ button {
 .sheet-subtitle {
   margin: -8px 0 0;
   color: var(--muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 12px;
   text-align: center;
 }
@@ -1672,6 +1926,7 @@ button {
 }
 
 .field {
+  min-width: 0;
   display: grid;
   gap: 6px;
   margin-bottom: 14px;
@@ -1683,6 +1938,8 @@ button {
 .field input,
 .field select,
 .field textarea {
+  min-width: 0;
+  max-width: 100%;
   min-height: 43px;
   width: 100%;
   border: 1px solid var(--border);
@@ -1691,7 +1948,7 @@ button {
   padding: 0 12px;
   background: var(--bg);
   color: var(--fg);
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .field textarea {
@@ -1715,9 +1972,75 @@ button {
 }
 
 .secret-input {
+  min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
   gap: 8px;
+}
+
+.model-id-control {
+  min-width: 0;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.model-fetch-btn {
+  min-width: 98px;
+  min-height: 43px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.model-fetch-btn:disabled {
+  opacity: 0.58;
+  cursor: default;
+}
+
+.onboarding-model-list {
+  min-width: 0;
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 1px 0 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.onboarding-model-list button {
+  min-width: 0;
+  max-width: 190px;
+  min-height: 30px;
+  flex: 0 1 auto;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 0 9px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .secret-input button {
