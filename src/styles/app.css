@@ -1545,6 +1545,11 @@ button {
   border-bottom: 0;
 }
 
+.settings-row:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .settings-control-row {
   cursor: default;
 }

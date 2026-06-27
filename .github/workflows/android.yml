@@ -12,7 +12,11 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-android:
@@ -80,6 +84,13 @@ jobs:
       - name: Build Android package
         run: npm run tauri -- android build --apk --aab --ci
 
+      - name: Collect Android release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir -p release-assets
+          find src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" -exec cp {} release-assets/ \;
+          find src-tauri/gen/android/app/build/outputs/bundle -type f -name "*.aab" -exec cp {} release-assets/ \;
+
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -88,3 +99,11 @@ jobs:
             src-tauri/gen/android/app/build/outputs/apk/**/*.apk
             src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
           if-no-files-found: error
+
+      - name: Publish Android assets to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

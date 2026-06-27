@@ -14,6 +14,7 @@ export const defaultSettings: UserSettings = {
   fontSize: "medium",
   redactLogs: true,
   localOnly: true,
+  autoCheckUpdates: true,
   defaultModelId: null,
   contextMessageLimit: 16,
 };

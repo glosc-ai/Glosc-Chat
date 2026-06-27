@@ -99,6 +99,7 @@ export interface UserSettings {
   fontSize: "small" | "medium" | "large";
   redactLogs: boolean;
   localOnly: boolean;
+  autoCheckUpdates: boolean;
   defaultModelId: string | null;
   contextMessageLimit: number;
 }

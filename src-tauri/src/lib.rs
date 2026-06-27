@@ -989,8 +989,9 @@ fn map_status_error(status: u16) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .manage(StreamCancels::default())
         .manage(SecretCache::default())
         .invoke_handler(tauri::generate_handler![
@@ -1000,7 +1001,12 @@ pub fn run() {
             list_openai_models,
             stream_openai_chat,
             cancel_stream,
-        ])
+        ]);
+
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
 import {
   AlertTriangle,
   Bot,
@@ -65,6 +65,12 @@ import {
   savePersistedState,
   type PersistedState,
 } from "./services/storageService";
+import {
+  checkForAppUpdate,
+  getCurrentAppVersion,
+  installDesktopUpdate,
+  type AppUpdateAvailable,
+} from "./services/updateService";
 
 type ModelFilter = "all" | "chat" | "vision" | "tools";
 
@@ -172,6 +178,11 @@ const onboardingModelsFetched = ref(false);
 const keyboardInset = ref(0);
 const appHeight = ref(0);
 const trackedViewport = ref<VisualViewport | null>(null);
+const appVersion = ref("0.1.0");
+const updateChecking = ref(false);
+const updateStatusText = ref("未检查");
+const updateProgress = ref<number | null>(null);
+const availableUpdate = shallowRef<AppUpdateAvailable | null>(null);
 
 const state = reactive<PersistedState>(createInitialState());
 const stateHydrated = ref(false);
@@ -230,6 +241,19 @@ const currentMessages = computed<ChatMessage[]>(() => {
 });
 
 const selectableModels = computed(() => state.models.filter((model) => isSelectableModel(model)));
+
+const updateRowValue = computed(() => {
+  if (updateChecking.value) {
+    return updateProgress.value === null ? "检查中" : `${updateProgress.value}%`;
+  }
+  if (availableUpdate.value) return `v${availableUpdate.value.version}`;
+  return updateStatusText.value;
+});
+
+const updateActionLabel = computed(() => {
+  if (!availableUpdate.value) return "检查更新";
+  return availableUpdate.value.source === "desktop-updater" ? "安装更新" : "获取更新";
+});
 
 const modelSheetModels = computed(() => {
   const keyword = modelSheetSearch.value.trim().toLowerCase();
@@ -339,6 +363,7 @@ onBeforeUnmount(() => {
 
 onMounted(async () => {
   startKeyboardTracking();
+  appVersion.value = await getCurrentAppVersion();
   const persisted = await loadPersistedState();
   if (persisted) {
     Object.assign(state, normalizeImportedState(persisted));
@@ -346,6 +371,7 @@ onMounted(async () => {
   }
   stateHydrated.value = true;
   void refreshAllProviderModels(false);
+  if (state.settings.autoCheckUpdates) void checkForUpdates({ silent: true });
 });
 
 function createInitialState(): PersistedState {
@@ -1912,6 +1938,98 @@ function cycleFontSize(): void {
   showToast(`字体大小：${fontSizeLabel(state.settings.fontSize)}`);
 }
 
+function toggleAutoCheckUpdates(): void {
+  state.settings.autoCheckUpdates = !state.settings.autoCheckUpdates;
+  showToast(state.settings.autoCheckUpdates ? "已开启自动检查更新" : "已关闭自动检查更新");
+  if (state.settings.autoCheckUpdates) void checkForUpdates({ silent: true });
+}
+
+async function checkForUpdates(options: { silent?: boolean } = {}): Promise<void> {
+  if (updateChecking.value) return;
+
+  updateChecking.value = true;
+  updateProgress.value = null;
+  updateStatusText.value = "检查中";
+
+  try {
+    const result = await checkForAppUpdate();
+    appVersion.value = result.currentVersion;
+
+    if (result.status === "available") {
+      availableUpdate.value = result;
+      updateStatusText.value = `发现 v${result.version}`;
+      showToast(`发现新版本 v${result.version}`);
+      return;
+    }
+
+    availableUpdate.value = null;
+    updateStatusText.value = "已是最新";
+    if (!options.silent) showToast("当前已是最新版本");
+  } catch (error) {
+    updateStatusText.value = "检查失败";
+    if (!options.silent) showToast(formatUpdateError(error));
+  } finally {
+    updateChecking.value = false;
+    updateProgress.value = null;
+  }
+}
+
+async function installOrOpenUpdate(): Promise<void> {
+  const update = availableUpdate.value;
+  if (!update) {
+    await checkForUpdates();
+    return;
+  }
+
+  if (update.source === "github-release") {
+    await openExternalUrl(update.downloadUrl);
+    showToast(update.assetName ? "已打开 APK 下载" : "已打开 Release 页面");
+    return;
+  }
+
+  if (!window.confirm(`安装 Glosc Chat v${update.version} 并重启应用？`)) return;
+
+  updateChecking.value = true;
+  updateStatusText.value = "下载中";
+  updateProgress.value = 0;
+
+  let downloadedBytes = 0;
+  let contentLength = 0;
+
+  try {
+    await installDesktopUpdate(update, (event) => {
+      if (event.event === "Started") {
+        downloadedBytes = 0;
+        contentLength = event.data.contentLength ?? 0;
+        updateProgress.value = contentLength > 0 ? 0 : null;
+        return;
+      }
+
+      if (event.event === "Progress") {
+        downloadedBytes += event.data.chunkLength;
+        updateProgress.value = contentLength > 0 ? Math.min(99, Math.round((downloadedBytes / contentLength) * 100)) : null;
+        return;
+      }
+
+      updateProgress.value = 100;
+      updateStatusText.value = "安装中";
+    });
+    showToast("更新已安装，正在重启应用");
+  } catch (error) {
+    updateStatusText.value = "安装失败";
+    showToast(formatUpdateError(error));
+  } finally {
+    updateChecking.value = false;
+    updateProgress.value = null;
+  }
+}
+
+function formatUpdateError(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return "更新操作失败";
+}
+
 function renderMarkdown(content: string): string {
   return markdown.render(content);
 }
@@ -2462,11 +2580,34 @@ function showToast(text: string): void {
           </div>
 
           <div class="settings-group">
+            <div class="settings-group-title">应用更新</div>
+            <div class="settings-card">
+              <button class="settings-row" type="button" :disabled="updateChecking" @click="installOrOpenUpdate">
+                <span class="row-left"><Download :size="18" /> {{ updateActionLabel }}</span>
+                <span class="row-value">{{ updateRowValue }} <ChevronRight :size="16" /></span>
+              </button>
+              <button class="settings-row" type="button" @click="toggleAutoCheckUpdates">
+                <span class="row-left"><RefreshCw :size="18" /> 自动检查</span>
+                <span class="toggle" :class="{ on: state.settings.autoCheckUpdates }"></span>
+              </button>
+              <button
+                v-if="availableUpdate?.source === 'github-release'"
+                class="settings-row"
+                type="button"
+                @click="openExternalUrl(availableUpdate.releaseUrl)"
+              >
+                <span class="row-left"><ExternalLink :size="18" /> Release 页面</span>
+                <ChevronRight :size="16" />
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-group">
             <div class="settings-group-title">关于</div>
             <div class="settings-card">
-              <button class="settings-row" type="button" @click="showToast('Glosc Chat v0.1.0 · Tauri 2 + Vue 3')">
+              <button class="settings-row" type="button" @click="showToast(`Glosc Chat v${appVersion} · Tauri 2 + Vue 3`)">
                 <span class="row-left"><Info :size="18" /> 版本</span>
-                <span class="row-value">0.1.0 <ChevronRight :size="16" /></span>
+                <span class="row-value">{{ appVersion }} <ChevronRight :size="16" /></span>
               </button>
               <button class="settings-row danger" type="button" @click="clearSheetOpen = true">
                 <span class="row-left"><Trash2 :size="18" /> 清除所有会话数据</span>
