@@ -26,6 +26,32 @@ npm run build
 
 构建产物输出到 `dist/`。
 
+## GitHub Pages 部署
+
+仓库已配置 GitHub Actions：推送到 `web` 分支或手动运行 `Deploy GitHub Pages` workflow 时，会自动构建并部署到 GitHub Pages。
+
+首次启用时，在 GitHub 仓库中进入 `Settings` → `Pages`，将 `Build and deployment` 的 `Source` 设为 `GitHub Actions`。
+
+默认 Pages 地址按项目页配置：
+
+```text
+https://glosc-ai.github.io/Glosc-Chat/
+```
+
+对应 workflow 会使用：
+
+```text
+VITE_BASE_PATH=/Glosc-Chat/
+```
+
+如果后续绑定自定义域名并部署到根路径，把 `.github/workflows/github-pages.yml` 中的 `VITE_BASE_PATH` 改为 `/`。
+
+本地模拟 GitHub Pages 构建：
+
+```bash
+VITE_BASE_PATH=/Glosc-Chat/ npm run build:github-pages
+```
+
 ## 主要目录
 
 ```text

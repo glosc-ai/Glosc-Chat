@@ -124,8 +124,8 @@ function closeMenu() {
           </div>
         </div>
       </div>
-      <div class="border-t border-white/10 px-5 py-5 text-center text-xs text-white/48">
-        © 2026 Glosc AI. All rights reserved.
+      <div class="border-t border-white/10 px-5 py-5 text-center text-xs leading-6 text-white/48">
+        @ 2026 Glosc AI One. 版权所有 沪ICP备2026003781号-1 沪公网安备31011202022083号
       </div>
     </footer>
   </div>
