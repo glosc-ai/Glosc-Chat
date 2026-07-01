@@ -11,7 +11,7 @@ export interface ProviderModelSummary {
 
 export async function listProviderModels(provider: ProviderConfig): Promise<ProviderModelSummary[]> {
   if (isTauri()) {
-    return invoke<ProviderModelSummary[]>("list_openai_models", { provider: toCommandProvider(provider) });
+    return invoke<ProviderModelSummary[]>("list_provider_models_cmd", { provider: toCommandProvider(provider) });
   }
 
   const apiKey = getSessionApiKey(provider.id);

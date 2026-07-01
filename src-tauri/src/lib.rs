@@ -19,6 +19,7 @@ use tauri::{ipc::Channel, AppHandle, State};
 
 const SECRET_SERVICE: &str = "com.gloscai.glosc-chat";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+const CHAT_COMPLETIONS_PROVIDER_TYPE: &str = "chat-completions";
 
 #[derive(Default)]
 struct StreamCancels(Mutex<HashMap<String, Arc<AtomicBool>>>);
@@ -97,7 +98,7 @@ enum ChatStreamEvent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProviderKind {
-    OpenAiCompatible,
+    ChatCompletions,
     Anthropic,
     Gemini,
     Custom,
@@ -165,7 +166,7 @@ fn delete_api_key(
 }
 
 #[tauri::command]
-async fn list_openai_models(
+async fn list_provider_models_cmd(
     provider: ProviderRequest,
     secrets: State<'_, SecretCache>,
     app: AppHandle,
@@ -174,7 +175,7 @@ async fn list_openai_models(
 }
 
 #[tauri::command]
-async fn stream_openai_chat(
+async fn stream_provider_chat(
     request: ChatRequest,
     on_event: Channel<ChatStreamEvent>,
     cancels: State<'_, StreamCancels>,
@@ -223,7 +224,7 @@ async fn list_provider_models(
     let kind = provider_kind(&provider)?;
     let api_key = read_api_key(&provider.id, secrets, app)?;
     let default_path = match kind {
-        ProviderKind::OpenAiCompatible | ProviderKind::Custom => "/models",
+        ProviderKind::ChatCompletions | ProviderKind::Custom => "/models",
         ProviderKind::Anthropic => "/v1/models",
         ProviderKind::Gemini => "/models",
     };
@@ -368,7 +369,7 @@ fn build_chat_request(
     api_key: &str,
 ) -> Result<(String, Value), String> {
     match kind {
-        ProviderKind::OpenAiCompatible | ProviderKind::Custom => {
+        ProviderKind::ChatCompletions | ProviderKind::Custom => {
             let url = join_url(
                 &request.provider.base_url,
                 request
@@ -377,7 +378,7 @@ fn build_chat_request(
                     .as_deref()
                     .unwrap_or("/chat/completions"),
             )?;
-            Ok((url, openai_payload(request)))
+            Ok((url, chat_completions_payload(request)))
         }
         ProviderKind::Anthropic => {
             let url = join_url(
@@ -407,14 +408,14 @@ fn build_chat_request(
     }
 }
 
-fn openai_payload(request: &ChatRequest) -> Value {
+fn chat_completions_payload(request: &ChatRequest) -> Value {
     json!({
         "model": request.model.name,
         "stream": true,
         "messages": request.messages.iter().map(|message| {
             json!({
                 "role": message.role,
-                "content": openai_message_content(message),
+                "content": chat_completions_message_content(message),
             })
         }).collect::<Vec<_>>(),
         "temperature": request.parameters.temperature,
@@ -425,7 +426,7 @@ fn openai_payload(request: &ChatRequest) -> Value {
     })
 }
 
-fn openai_message_content(message: &MessageRequest) -> Value {
+fn chat_completions_message_content(message: &MessageRequest) -> Value {
     let images = image_attachments(message);
     if images.is_empty() || message.role != "user" {
         return Value::String(message.content.clone());
@@ -605,7 +606,7 @@ fn extract_delta_text(kind: ProviderKind, data: &str) -> Result<ParsedDelta, Str
     }
 
     let text = match kind {
-        ProviderKind::OpenAiCompatible | ProviderKind::Custom => value
+        ProviderKind::ChatCompletions | ProviderKind::Custom => value
             .get("choices")
             .and_then(Value::as_array)
             .and_then(|choices| choices.first())
@@ -641,7 +642,7 @@ fn extract_delta_text(kind: ProviderKind, data: &str) -> Result<ParsedDelta, Str
 
 fn extract_models(kind: ProviderKind, body: &Value) -> Vec<ModelSummary> {
     match kind {
-        ProviderKind::OpenAiCompatible | ProviderKind::Custom | ProviderKind::Anthropic => body
+        ProviderKind::ChatCompletions | ProviderKind::Custom | ProviderKind::Anthropic => body
             .get("data")
             .and_then(Value::as_array)
             .map(|items| {
@@ -675,7 +676,7 @@ fn extract_models(kind: ProviderKind, body: &Value) -> Vec<ModelSummary> {
 
 fn provider_kind(provider: &ProviderRequest) -> Result<ProviderKind, String> {
     match provider.provider_type.as_str() {
-        "openai-compatible" => Ok(ProviderKind::OpenAiCompatible),
+        value if value == CHAT_COMPLETIONS_PROVIDER_TYPE => Ok(ProviderKind::ChatCompletions),
         "anthropic" => Ok(ProviderKind::Anthropic),
         "gemini" => Ok(ProviderKind::Gemini),
         "custom" => Ok(ProviderKind::Custom),
@@ -692,7 +693,7 @@ fn build_headers(
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
     match kind {
-        ProviderKind::OpenAiCompatible | ProviderKind::Custom => {
+        ProviderKind::ChatCompletions | ProviderKind::Custom => {
             let auth_value = format!("Bearer {api_key}");
             headers.insert(
                 AUTHORIZATION,
@@ -998,8 +999,8 @@ pub fn run() {
             save_api_key,
             api_key_exists,
             delete_api_key,
-            list_openai_models,
-            stream_openai_chat,
+            list_provider_models_cmd,
+            stream_provider_chat,
             cancel_stream,
         ]);
 

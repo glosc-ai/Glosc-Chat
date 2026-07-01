@@ -13,7 +13,7 @@ Glosc Chat 是一款面向 Android 和 iOS 的 AI 会话应用。用户可以自
 | 前端框架 | 已接入 Vue 3 + TypeScript + Vite |
 | 应用壳 | 已接入 Tauri 2 |
 | Rust 命令 | 已接入 API Key 安全存储、模型列表查询和多 Provider 流式网络代理 |
-| AI 会话 | 已实现 OpenAI-compatible、Anthropic、Gemini 和 custom 真实流式聊天闭环 |
+| AI 会话 | 已实现 Chat Completions 兼容、Anthropic、Gemini 和 custom 真实流式聊天闭环 |
 | API Key 配置 | 已实现 Provider 表单、密钥遮罩/引用和 Tauri/Rust 系统安全存储 |
 | 会话历史 | 已实现 IndexedDB 本地会话、消息和模型配置持久化 |
 | 移动端构建 | 已生成 Tauri Android/iOS 工程骨架，真机签名和发布流程待验证 |
@@ -39,7 +39,7 @@ Glosc Chat 是一款面向 Android 和 iOS 的 AI 会话应用。用户可以自
 | 用户类型 | 需求 |
 | --- | --- |
 | AI 重度用户 | 在手机上快速切换模型，保留上下文和历史记录 |
-| 开发者/技术用户 | 使用 OpenAI-compatible API、本地模型网关或自建代理 |
+| 开发者/技术用户 | 使用 Chat Completions 兼容 API、本地模型网关或自建代理 |
 | 内容创作者 | 管理常用提示词、长文本会话和知识资料 |
 | 企业或团队中的个人用户 | 在不依赖平台账号体系的情况下使用内部模型 API |
 
@@ -59,7 +59,7 @@ Glosc Chat 是一款面向 Android 和 iOS 的 AI 会话应用。用户可以自
 - Vite + Vue 3 前端工程。
 - Tauri 2 应用壳。
 - Open Design 视觉落地：聊天页、会话抽屉、模型页、Provider 配置页和设置页。
-- OpenAI-compatible、Anthropic、Gemini 和 custom 真实流式输出、停止生成、重试、复制、引用和删除消息。
+- Chat Completions 兼容、Anthropic、Gemini 和 custom 真实流式输出、停止生成、重试、复制、引用和删除消息。
 - Provider 配置、系统安全存储密钥、模型同步、模型参数、默认模型和本地设置。
 - IndexedDB 本地持久化会话、消息、Provider 元数据、模型和偏好设置。
 - 会话搜索、置顶、归档、删除和 Markdown 导出。
@@ -75,7 +75,7 @@ MVP 的目标是让用户可以稳定完成一次真实 AI 对话，并能在下
 | 模块 | MVP 要求 |
 | --- | --- |
 | 首次启动 | 引导用户添加第一个 API Provider |
-| 模型配置 | 支持 OpenAI-compatible API 地址、API Key、模型名 |
+| 模型配置 | 支持 Chat Completions 兼容 API 地址、API Key、模型名 |
 | 聊天 | 支持新建会话、发送消息、流式输出、停止生成、重试 |
 | 历史记录 | 本地保存会话列表、消息和模型信息 |
 | Markdown | 支持代码块、列表、链接、复制 |
@@ -87,7 +87,7 @@ MVP 的目标是让用户可以稳定完成一次真实 AI 对话，并能在下
 
 | 模块 | V1 要求 |
 | --- | --- |
-| 多 Provider | OpenAI-compatible、Anthropic、Gemini 或自定义适配器 |
+| 多 Provider | Chat Completions 兼容、Anthropic、Gemini 或自定义适配器 |
 | 模型管理 | 模型别名、可用性检测、默认参数模板 |
 | 会话管理 | 搜索、置顶、归档、删除、导出 |
 | 提示词 | 常用提示词模板、系统提示词、变量填充 |
@@ -245,7 +245,7 @@ MVP 推荐信息架构：
 | 风险 | 影响 | 对策 |
 | --- | --- | --- |
 | API Key 明文存储 | 用户隐私和资金风险 | 使用系统安全存储；日志脱敏 |
-| 多供应商接口差异 | 适配复杂度上升 | 先定义统一 Provider 接口；OpenAI-compatible 优先 |
+| 多供应商接口差异 | 适配复杂度上升 | 先定义统一 Provider 接口；优先支持 Chat Completions 兼容 |
 | 移动端网络限制 | 流式输出和后台恢复不稳定 | 抽象请求层；记录请求状态；支持重试 |
 | 长会话性能下降 | 聊天界面卡顿 | 虚拟列表、摘要上下文、分段加载 |
 | Tauri 移动端经验不足 | 发布周期不确定 | 先保留桌面可运行闭环，再逐步配置移动端 |

@@ -18,7 +18,7 @@ open-webui 值得参考的方向：
 
 - 统一多模型入口。
 - 会话、模型、知识库、工具和设置的清晰分区。
-- 面向 OpenAI-compatible API 的兼容思路。
+- 面向 Chat Completions 兼容 API 的兼容思路。
 - RAG 和工具调用作为高级能力，而不是阻塞基础聊天的前置条件。
 
 Glosc Chat 的取舍：
@@ -37,7 +37,7 @@ flowchart TD
   State --> ChatService[Chat Service]
   State --> SettingsService[Settings Service]
   ChatService --> Provider[Provider Adapter]
-  Provider --> OpenAI[OpenAI-compatible API]
+  Provider --> CompatibleAPI[Chat Completions API]
   Provider --> Other[其他模型供应商]
   State --> Storage[本地存储层]
   Storage --> DB[(会话和设置数据库)]
@@ -83,7 +83,7 @@ src/
     settingsService.ts
     storageService.ts
   providers/
-    openaiCompatible.ts
+    chatCompletions.ts
     anthropic.ts
     gemini.ts
   stores/
@@ -151,7 +151,7 @@ flowchart LR
 
 ```ts
 export type ProviderType =
-  | "openai-compatible"
+  | "chat-completions"
   | "anthropic"
   | "gemini"
   | "custom";
@@ -254,7 +254,7 @@ export interface ChatChunk {
 
 ### 7.1 MVP 适配优先级
 
-1. OpenAI-compatible：覆盖 OpenAI、兼容网关和大量第三方模型服务。
+1. Chat Completions 兼容：覆盖兼容网关和大量第三方模型服务。
 2. Anthropic：使用 `/v1/messages` 和 Anthropic SSE 事件。
 3. Gemini：使用 `streamGenerateContent?alt=sse` 和 Gemini inline data。
 4. 自定义 Provider：允许用户手动配置 header、路径和模型名。

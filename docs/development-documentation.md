@@ -162,7 +162,7 @@ src-tauri/src/
 7. 为错误映射和请求 payload 添加单元测试。
 8. 手动验证正常响应、鉴权失败、限流和中断。
 
-MVP 建议先实现 `openai-compatible`，因为它能覆盖 OpenAI 官方接口、兼容代理和大量第三方模型网关。
+MVP 建议先实现 `chat-completions`，因为它能覆盖主流聊天补全接口、兼容代理和大量第三方模型网关。
 
 ## 8. 添加聊天功能的开发流程
 
@@ -287,7 +287,7 @@ VITE_ENABLE_DEBUG_PANEL=false
 优先测试：
 
 - Provider 错误映射。
-- OpenAI-compatible payload 构造。
+- Chat Completions 兼容 payload 构造。
 - 流式响应合并。
 - 停止生成和重试。
 - 会话导出不包含 API Key。
@@ -380,7 +380,7 @@ npm run tauri:build
 
 提交建议：
 
-- `feat: add openai compatible provider`
+- `feat: add chat completions provider`
 - `fix: handle stream interruption`
 - `docs: add development guide`
 - `refactor: split chat service`

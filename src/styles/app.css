@@ -1375,7 +1375,7 @@ button {
   font-size: 13px;
 }
 
-.provider-icon.openai {
+.provider-icon.compatible {
   background: color-mix(in oklch, oklch(60% 0.16 160) 15%, transparent);
   color: oklch(60% 0.16 160);
 }

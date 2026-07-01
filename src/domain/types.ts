@@ -1,6 +1,6 @@
 export type AppTab = "chat" | "models" | "providers" | "settings";
 
-export type ProviderType = "openai-compatible" | "anthropic" | "gemini" | "custom";
+export type ProviderType = "chat-completions" | "anthropic" | "gemini" | "custom";
 
 export type ProviderStatus = "online" | "offline" | "error" | "testing";
 

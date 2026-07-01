@@ -46,7 +46,7 @@ async function streamViaTauri(
   signal.addEventListener("abort", abort, { once: true });
 
   try {
-    await invoke("stream_openai_chat", {
+    await invoke("stream_provider_chat", {
       request: toCommandRequest(request),
       onEvent: channel,
     });
@@ -192,19 +192,19 @@ function buildBrowserPayload(request: ChatStreamRequest): unknown {
       return anthropicPayload(request);
     case "gemini":
       return geminiPayload(request);
-    case "openai-compatible":
+    case "chat-completions":
     case "custom":
-      return openAiPayload(request);
+      return chatCompletionsPayload(request);
   }
 }
 
-function openAiPayload(request: ChatStreamRequest): unknown {
+function chatCompletionsPayload(request: ChatStreamRequest): unknown {
   return {
     model: request.model.name,
     stream: true,
     messages: request.messages.map((message) => ({
       role: message.role,
-      content: openAiMessageContent(message),
+      content: chatCompletionsMessageContent(message),
     })),
     temperature: request.parameters.temperature,
     top_p: request.parameters.topP,
@@ -267,7 +267,7 @@ function geminiPayload(request: ChatStreamRequest): unknown {
   return payload;
 }
 
-function openAiMessageContent(message: ChatMessage): string | Array<Record<string, unknown>> {
+function chatCompletionsMessageContent(message: ChatMessage): string | Array<Record<string, unknown>> {
   const images = imageAttachments(message);
   if (!images.length || message.role !== "user") return message.content;
 

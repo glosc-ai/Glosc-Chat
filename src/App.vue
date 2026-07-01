@@ -85,6 +85,8 @@ const GLOSC_AI_HOME_URL = "https://one.gloscai.com";
 const GLOSC_AI_KEYS_URL = "https://one.gloscai.com/keys";
 const GLOSC_AI_BASE_URL = "https://one.gloscai.com/v1";
 const GLOSC_AI_DEFAULT_MODEL = "deepseek/deepseek-v4-flash";
+const DEFAULT_PROVIDER_TYPE: ProviderType = "chat-completions";
+const LEGACY_COMPATIBLE_PROVIDER_TYPE = "open" + "ai-compatible";
 
 const tabs = [
   { id: "chat", label: "聊天", icon: MessageSquare },
@@ -93,28 +95,28 @@ const tabs = [
 ] as const;
 
 const providerTypeLabels: Record<ProviderType, string> = {
-  "openai-compatible": "OpenAI-compatible",
+  "chat-completions": "Chat Completions",
   anthropic: "Anthropic",
   gemini: "Gemini",
   custom: "Custom",
 };
 
 const providerTypeDefaults: Record<ProviderType, string> = {
-  "openai-compatible": "https://api.openai.com/v1",
+  "chat-completions": "https://api.example.com/v1",
   anthropic: "https://api.anthropic.com",
   gemini: "https://generativelanguage.googleapis.com/v1beta",
   custom: "https://api.example.com/v1",
 };
 
 const providerChatPathDefaults: Record<ProviderType, string> = {
-  "openai-compatible": "/chat/completions",
+  "chat-completions": "/chat/completions",
   anthropic: "/v1/messages",
   gemini: "/models/{model}:streamGenerateContent?alt=sse",
   custom: "/chat/completions",
 };
 
 const providerModelsPathDefaults: Record<ProviderType, string> = {
-  "openai-compatible": "/models",
+  "chat-completions": "/models",
   anthropic: "/v1/models",
   gemini: "/models",
   custom: "/models",
@@ -190,10 +192,10 @@ const stateHydrated = ref(false);
 const providerForm = reactive({
   id: "",
   name: "",
-  type: "openai-compatible" as ProviderType,
-  baseUrl: providerTypeDefaults["openai-compatible"],
-  chatPath: providerChatPathDefaults["openai-compatible"],
-  modelsPath: providerModelsPathDefaults["openai-compatible"],
+  type: DEFAULT_PROVIDER_TYPE as ProviderType,
+  baseUrl: providerTypeDefaults[DEFAULT_PROVIDER_TYPE],
+  chatPath: providerChatPathDefaults[DEFAULT_PROVIDER_TYPE],
+  modelsPath: providerModelsPathDefaults[DEFAULT_PROVIDER_TYPE],
   modelId: "",
   modelDisplayName: "",
   contextWindow: "自定义",
@@ -551,10 +553,10 @@ function createGloscProviderConfig(id: string, keyHint: string, existing?: Provi
   return {
     id,
     name: GLOSC_AI_PROVIDER_NAME,
-    type: "openai-compatible",
+    type: DEFAULT_PROVIDER_TYPE,
     baseUrl: GLOSC_AI_BASE_URL,
-    chatPath: providerChatPathDefaults["openai-compatible"],
-    modelsPath: providerModelsPathDefaults["openai-compatible"],
+    chatPath: providerChatPathDefaults[DEFAULT_PROVIDER_TYPE],
+    modelsPath: providerModelsPathDefaults[DEFAULT_PROVIDER_TYPE],
     customHeaders: existing?.customHeaders,
     apiKeyRef: `secret://providers/${id}`,
     keyHint,
@@ -1460,7 +1462,7 @@ function providerInitial(provider: ProviderConfig): string {
 
 function providerClass(provider?: ProviderConfig): string {
   if (!provider) return "custom";
-  if (provider.id.includes("openai")) return "openai";
+  if (provider.type === "chat-completions") return "compatible";
   if (provider.type === "anthropic") return "anthropic";
   if (provider.type === "gemini") return "gemini";
   return "custom";
@@ -1477,7 +1479,7 @@ function statusLabel(provider: ProviderConfig): string {
 function openProviderForm(provider?: ProviderConfig): void {
   providerForm.id = provider?.id ?? "";
   providerForm.name = provider?.name ?? "";
-  providerForm.type = provider?.type ?? "openai-compatible";
+  providerForm.type = provider?.type ?? DEFAULT_PROVIDER_TYPE;
   providerForm.baseUrl = provider?.baseUrl ?? providerTypeDefaults[providerForm.type];
   providerForm.chatPath = provider?.chatPath ?? providerChatPathDefaults[providerForm.type];
   providerForm.modelsPath = provider?.modelsPath ?? providerModelsPathDefaults[providerForm.type];
@@ -1880,7 +1882,7 @@ async function clearAllData(): Promise<void> {
 function normalizeImportedState(imported: Partial<PersistedState>): PersistedState {
   return {
     schemaVersion: 2,
-    providers: imported.providers ?? [],
+    providers: (imported.providers ?? []).map(normalizeProvider),
     models: (imported.models ?? []).map(normalizeModel),
     conversations: imported.conversations ?? [],
     messages: imported.messages ?? {},
@@ -1889,6 +1891,19 @@ function normalizeImportedState(imported: Partial<PersistedState>): PersistedSta
     selectedConversationId: imported.selectedConversationId ?? null,
     exportedAt: imported.exportedAt,
   };
+}
+
+function normalizeProvider(provider: ProviderConfig): ProviderConfig {
+  return {
+    ...provider,
+    type: normalizeProviderType(provider.type),
+  };
+}
+
+function normalizeProviderType(type: unknown): ProviderType {
+  if (type === LEGACY_COMPATIBLE_PROVIDER_TYPE) return DEFAULT_PROVIDER_TYPE;
+  if (type === "chat-completions" || type === "anthropic" || type === "gemini" || type === "custom") return type;
+  return "custom";
 }
 
 function normalizeModel(model: ModelConfig): ModelConfig {
@@ -2738,7 +2753,7 @@ function showToast(text: string): void {
             <label class="field">
               <span>类型</span>
               <select :value="providerForm.type" @change="changeProviderType(($event.target as HTMLSelectElement).value as ProviderType)">
-                <option value="openai-compatible">OpenAI-compatible</option>
+                <option value="chat-completions">Chat Completions</option>
                 <option value="anthropic">Anthropic</option>
                 <option value="gemini">Gemini</option>
                 <option value="custom">Custom</option>
@@ -2746,11 +2761,11 @@ function showToast(text: string): void {
             </label>
             <label class="field">
               <span>名称</span>
-              <input v-model="providerForm.name" type="text" placeholder="例如：我的 OpenAI" autocomplete="off" />
+              <input v-model="providerForm.name" type="text" placeholder="例如：我的模型服务" autocomplete="off" />
             </label>
             <label class="field">
               <span>Base URL</span>
-              <input v-model="providerForm.baseUrl" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" autocapitalize="off" spellcheck="false" />
+              <input v-model="providerForm.baseUrl" type="url" placeholder="https://api.example.com/v1" autocomplete="off" autocapitalize="off" spellcheck="false" />
             </label>
             <label class="field">
               <span>API Key</span>
